@@ -194,7 +194,7 @@ export default function UploadSuppliersPage() {
                 <header className="mb-6">
                     <h1 className="text-3xl font-bold text-green-700">Upload Suppliers from Excel</h1>
                     <p className="text-gray-600 mt-2">
-                        Download the sample template, fill in supplier data (except currency, component type, percentage, and excise quantity which you'll enter manually), and upload the file.
+                        Download the sample template, fill in supplier data (except currency, component type, percentage, and excise quantity which you&apos;ll enter manually), and upload the file.
                     </p>
                 </header>
 
