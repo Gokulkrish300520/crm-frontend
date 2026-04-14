@@ -2,21 +2,19 @@
 
 import { STORAGE_KEYS } from "@/constants/storage";
 import {
-    HierarchicalPipeline,
-    pipelineHelpers,
-    type FlatPipeline
+  HierarchicalPipeline,
+  pipelineHelpers,
+  type FlatPipeline
 } from "@/types/pipeline";
 import { readJson, writeJson } from "@/utils/storage";
 import {
-    BookOpen,
-    Box,
-    Calendar,
-    CheckCircle,
-    Flag,
-    Layers,
-    Plus,
-    Settings,
-    Users,
+  BookOpen,
+  CheckCircle,
+  Flag,
+  Layers,
+  Plus,
+  Settings,
+  Users
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -49,12 +47,10 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", href: "/crm", Icon: Flag },
   { id: "contacts", label: "Contacts", href: "/crm/contacts", Icon: Users },
   { id: "companies", label: "Companies", href: "/crm/company", Icon: BookOpen },
-  { id: "products", label: "Products", href: "", Icon: Box },
-  { id: "activities", label: "Activities", href: "", Icon: Calendar },
   { id: "qc1", label: "QC1 Dashboard", href: "/crm/qc1", Icon: CheckCircle },
-  { id: "reports", label: "Reports", href: "", Icon: Flag },
-  { id: "admin", label: "Admin", href: "/crm/admin", Icon: Settings },
-  { id: "settings", label: "Settings", href: "", Icon: Settings },
+  { id: "qc2", label: "QC2 Dashboard", href: "/crm/qc2", Icon: CheckCircle },
+  { id: "payment-approvals", label: "Payment Approvals", href: "/crm/admin/payment-approvals", Icon: CheckCircle },
+  { id: "super-admin", label: "Super Admin", href: "/crm/admin", Icon: Settings },
 ];
 
 export default function Sidebar({

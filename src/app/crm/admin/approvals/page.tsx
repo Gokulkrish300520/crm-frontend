@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { CheckCircle, XCircle, Eye, Clock, Bell } from "lucide-react";
+import { Bell, CheckCircle, ChevronDown, ChevronUp, Clock, Eye, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 
 type ApprovalRequest = {
     id: string;
@@ -30,9 +29,9 @@ type PreprocessItem = {
 };
 
 export default function ApprovalsPage() {
-    const router = useRouter();
     const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
     const [preprocessData, setPreprocessData] = useState<PreprocessItem[]>([]);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
     const [rejectionModal, setRejectionModal] = useState<{ isOpen: boolean; itemId: string; pipelineId: string }>({ 
         isOpen: false, 
         itemId: '', 
@@ -141,8 +140,8 @@ export default function ApprovalsPage() {
         }
     };
 
-    const handleView = (itemId: string, pipelineId: string) => {
-        router.push(`/crm/pipelines/${pipelineId}/preprocess/${itemId}/edit`);
+    const handleView = (itemId: string) => {
+        setExpandedId(prev => (prev === itemId ? null : itemId));
     };
 
     const getItemDetails = (requestId: string) => {
@@ -165,23 +164,67 @@ export default function ApprovalsPage() {
                     </div>
                 ) : (
                     <div className="space-y-4">
+                        <div className="hidden md:grid md:grid-cols-6 gap-3 bg-white border rounded-lg px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            <p>Request</p>
+                            <p>Requested By</p>
+                            <p>Requested Date & Time</p>
+                            <p>Status</p>
+                            <p>Updated Status Time</p>
+                            <p className="text-right">Action</p>
+                        </div>
+
                         {approvalRequests.map(request => {
                             const item = getItemDetails(request.id);
                             if (!item) return null;
 
+                            const statusUpdatedAt = item.last_reminder_date || request.last_reminder || item.approval_requested_date || request.requested_date;
+
                             return (
-                                <div key={request.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <h3 className="text-xl font-semibold text-gray-800">{item.company_name}</h3>
-                                                <span className="px-3 py-1 text-xs font-semibold bg-yellow-100 text-yellow-800 rounded-full flex items-center gap-1">
+                                <div key={request.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleView(request.id)}
+                                        className="w-full text-left px-4 py-4"
+                                    >
+                                        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-start md:items-center">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">New Admin Request</p>
+                                                <p className="text-xs text-gray-500 md:hidden">Request</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-gray-800">{request.requested_by || item.project_handled_by || "-"}</p>
+                                                <p className="text-xs text-gray-500 md:hidden">Requested By</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-gray-800">{format(new Date(request.requested_date), "dd/MM/yyyy hh:mm a")}</p>
+                                                <p className="text-xs text-gray-500 md:hidden">Requested Date & Time</p>
+                                            </div>
+                                            <div>
+                                                <span className="px-3 py-1 text-xs font-semibold bg-yellow-100 text-yellow-800 rounded-full inline-flex items-center gap-1">
                                                     <Clock className="h-3 w-3" />
                                                     Pending Approval
                                                 </span>
+                                                <p className="text-xs text-gray-500 md:hidden mt-1">Status</p>
                                             </div>
-                                            
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                            <div>
+                                                <p className="text-sm text-gray-800">{statusUpdatedAt ? format(new Date(statusUpdatedAt), "dd/MM/yyyy hh:mm a") : "-"}</p>
+                                                <p className="text-xs text-gray-500 md:hidden">Updated Status Time</p>
+                                            </div>
+                                            <div className="flex items-center justify-end gap-2 text-blue-700 font-semibold text-sm">
+                                                <Eye className="h-4 w-4" />
+                                                {expandedId === request.id ? "Hide Details" : "View Details"}
+                                                {expandedId === request.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    {expandedId === request.id && (
+                                        <div className="border-t px-4 pb-4">
+                                            <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                                                <div>
+                                                    <p className="text-xs text-gray-500">Company</p>
+                                                    <p className="font-medium text-gray-800">{item.company_name}</p>
+                                                </div>
                                                 <div>
                                                     <p className="text-xs text-gray-500">Department</p>
                                                     <p className="font-medium text-gray-800">{item.department}</p>
@@ -189,57 +232,128 @@ export default function ApprovalsPage() {
                                                 <div>
                                                     <p className="text-xs text-gray-500">Order Value</p>
                                                     <p className="font-medium text-gray-800">
-                                                        {(item.order_value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' })}
+                                                        {(item.order_value || 0).toLocaleString("en-IN", { style: "currency", currency: "INR" })}
                                                     </p>
                                                 </div>
                                                 <div>
                                                     <p className="text-xs text-gray-500">Handled By</p>
-                                                    <p className="font-medium text-gray-800">{item.project_handled_by}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-xs text-gray-500">Requested By</p>
-                                                    <p className="font-medium text-gray-800">{request.requested_by}</p>
+                                                    <p className="font-medium text-gray-800">{item.project_handled_by || "-"}</p>
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                                                <span>
-                                                    <strong>Requested:</strong> {format(new Date(request.requested_date), "MMM dd, yyyy 'at' hh:mm a")}
-                                                </span>
-                                                {request.last_reminder && (
-                                                    <span className="flex items-center gap-1 text-orange-600">
-                                                        <Bell className="h-4 w-4" />
-                                                        <strong>Last Reminder:</strong> {format(new Date(request.last_reminder), "MMM dd, yyyy")}
-                                                    </span>
-                                                )}
+                                            {!!request.last_reminder && (
+                                                <div className="mb-4 inline-flex items-center gap-1 text-orange-600 text-sm">
+                                                    <Bell className="h-4 w-4" />
+                                                    <span><strong>Last Reminder:</strong> {format(new Date(request.last_reminder), "MMM dd, yyyy hh:mm a")}</span>
+                                                </div>
+                                            )}
+
+                                            {Array.isArray(item.working_timeline) && item.working_timeline.length > 0 && (
+                                                <div className="mb-4 border rounded-lg p-3">
+                                                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Working Timeline</h4>
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full text-sm">
+                                                            <thead className="bg-gray-50">
+                                                                <tr>
+                                                                    <th className="p-2 text-left">S.No</th>
+                                                                    <th className="p-2 text-left">Description</th>
+                                                                    <th className="p-2 text-left">Deadline</th>
+                                                                    <th className="p-2 text-left">Approved</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {item.working_timeline.map((row: any, idx: number) => (
+                                                                    <tr key={idx} className="border-t">
+                                                                        <td className="p-2">{row.s_no}</td>
+                                                                        <td className="p-2">{row.description || "-"}</td>
+                                                                        <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
+                                                                        <td className="p-2">{row.approved || "-"}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {Array.isArray(item.project_timeline) && item.project_timeline.length > 0 && (
+                                                <div className="mb-4 border rounded-lg p-3">
+                                                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Project Timeline</h4>
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full text-sm">
+                                                            <thead className="bg-gray-50">
+                                                                <tr>
+                                                                    <th className="p-2 text-left">S.No</th>
+                                                                    <th className="p-2 text-left">Description</th>
+                                                                    <th className="p-2 text-left">Deadline</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {item.project_timeline.map((row: any, idx: number) => (
+                                                                    <tr key={idx} className="border-t">
+                                                                        <td className="p-2">{row.s_no}</td>
+                                                                        <td className="p-2">{row.description || "-"}</td>
+                                                                        <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {Array.isArray(item.supplier_details) && item.supplier_details.length > 0 && (
+                                                <div className="mb-4 border rounded-lg p-3">
+                                                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Supplier Details</h4>
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full min-w-[900px] text-sm">
+                                                            <thead className="bg-gray-50">
+                                                                <tr>
+                                                                    <th className="p-2 text-left">S.No</th>
+                                                                    <th className="p-2 text-left">Type</th>
+                                                                    <th className="p-2 text-left">Manufacturer - Part Number</th>
+                                                                    <th className="p-2 text-left">Vendor</th>
+                                                                    <th className="p-2 text-right">Req Qty</th>
+                                                                    <th className="p-2 text-right">Excise Qty</th>
+                                                                    <th className="p-2 text-right">Total</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {item.supplier_details.map((row: any, idx: number) => (
+                                                                    <tr key={idx} className="border-t">
+                                                                        <td className="p-2">{row.s_no}</td>
+                                                                        <td className="p-2">{row.component_type || "-"}</td>
+                                                                        <td className="p-2">{row.manufacturer_part_number || "-"}</td>
+                                                                        <td className="p-2">{row.vendor_details || "-"}</td>
+                                                                        <td className="p-2 text-right">{row.req_quantity || 0}</td>
+                                                                        <td className="p-2 text-right">{row.excise_quantity || 0}</td>
+                                                                        <td className="p-2 text-right">{(row.total_price || 0).toLocaleString("en-IN")}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div className="flex gap-2 justify-end">
+                                                <button
+                                                    onClick={() => handleApprove(request.id, request.pipelineId)}
+                                                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded hover:bg-green-700 flex items-center gap-2"
+                                                >
+                                                    <CheckCircle className="h-4 w-4" />
+                                                    Approve
+                                                </button>
+                                                <button
+                                                    onClick={() => handleReject(request.id, request.pipelineId)}
+                                                    className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700 flex items-center gap-2"
+                                                >
+                                                    <XCircle className="h-4 w-4" />
+                                                    Reject
+                                                </button>
                                             </div>
                                         </div>
-
-                                        <div className="flex gap-2 ml-4">
-                                            <button
-                                                onClick={() => handleView(request.id, request.pipelineId)}
-                                                className="px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 rounded hover:bg-blue-100 flex items-center gap-2"
-                                                title="View Details"
-                                            >
-                                                <Eye className="h-4 w-4" />
-                                                View
-                                            </button>
-                                            <button
-                                                onClick={() => handleApprove(request.id, request.pipelineId)}
-                                                className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded hover:bg-green-700 flex items-center gap-2"
-                                            >
-                                                <CheckCircle className="h-4 w-4" />
-                                                Approve
-                                            </button>
-                                            <button
-                                                onClick={() => handleReject(request.id, request.pipelineId)}
-                                                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700 flex items-center gap-2"
-                                            >
-                                                <XCircle className="h-4 w-4" />
-                                                Reject
-                                            </button>
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
                             );
                         })}

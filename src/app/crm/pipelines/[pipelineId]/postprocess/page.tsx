@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
 import { format, isPast } from "date-fns";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { Fragment, useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
 // --- UPDATED TYPE DEFINITIONS ---
@@ -27,6 +28,21 @@ export type ProjectTimelineItem = {
     final_fileName?: string;
 };
 
+export type SupplierDetail = {
+    s_no: number;
+    component_type: "Active" | "Passive";
+    manufacturer_part_number: string;
+    vendor_details: string;
+    currency: string;
+    percentage: number;
+    req_quantity: number;
+    excise_quantity: number;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    qc2_status?: "Not Sent" | "Pending QC2" | "QC2 Rework Required" | "Approved" | "Rejected";
+};
+
 export type PostProcessItem = {
     id: string;
     date: string;
@@ -48,6 +64,9 @@ export type PostProcessItem = {
     project_handled_by: string;
     working_timeline: WorkingTimelineItem[];
     project_timeline: ProjectTimelineItem[];
+    supplier_details?: SupplierDetail[];
+    quotation_upload_reference?: string;
+    po_document?: string;
     expense_bill_format: string;
     post_process_status: "Pending" | "Completed";
     stage_history?: StageHistory[]; // Added field
@@ -64,6 +83,7 @@ export default function PostProcessListPage() {
     const params = useParams();
     const pipelineId = params?.pipelineId as string;
     const [items, setItems] = useState<PostProcessItem[]>([]);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
     const [dialogState, setDialogState] = useState({
         isOpen: false,
         item: null as PostProcessItem | null,
@@ -134,6 +154,10 @@ export default function PostProcessListPage() {
 
     const formatCurrency = (value: number) => (value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
 
+    const toggleView = (id: string) => {
+        setExpandedId((prev) => (prev === id ? null : id));
+    };
+
     const getProjectStatus = (item: PostProcessItem) => {
         const allTimelines = [...item.working_timeline, ...item.project_timeline];
         if (allTimelines.length === 0) return { text: "In Progress", color: "blue" };
@@ -142,6 +166,17 @@ export default function PostProcessListPage() {
         const isOverdue = allTimelines.some(t => t.status === "Over Due" && t.deadline && isPast(new Date(t.deadline)));
         if (isOverdue) return { text: "At Risk", color: "red" };
         return { text: "In Progress", color: "blue" };
+    };
+
+    const getQc2Status = (item: PostProcessItem) => {
+        const rows = Array.isArray(item.supplier_details) ? item.supplier_details : [];
+        if (rows.length === 0) return { text: "Not Sent", color: "gray" as const };
+
+        const statuses = rows.map((row) => row.qc2_status || "Not Sent");
+        if (statuses.some((s) => s === "Pending QC2")) return { text: "Pending QC2", color: "yellow" as const };
+        if (statuses.some((s) => s === "QC2 Rework Required" || s === "Rejected")) return { text: "QC2 Rework", color: "red" as const };
+        if (statuses.some((s) => s === "Approved")) return { text: "QC2 Approved", color: "green" as const };
+        return { text: "Not Sent", color: "gray" as const };
     };
 
     return (
@@ -153,38 +188,187 @@ export default function PostProcessListPage() {
             <div className="overflow-x-auto border rounded shadow">
                 <table className="w-full border-collapse">
                     <thead className="text-green-800 bg-green-100">
-                        <tr>{["Date", "Company", "Handled By", "Balance Due", "Project Status", "Actions"].map((h) => (<th key={h} className="p-2 text-left border">{h}</th>))}</tr>
+                        <tr>{["Date", "Company", "Handled By", "Balance Due", "Project Status", "QC2 Status", "Actions"].map((h) => (<th key={h} className="p-2 text-left border">{h}</th>))}</tr>
                     </thead>
                     <tbody>
                         {items.length > 0 ? (
                             items.map((item) => {
                                 const status = getProjectStatus(item);
+                                const qc2Status = getQc2Status(item);
                                 const rowClass = status.text === "At Risk" ? 'bg-red-50 border-l-4 border-red-500' : 'border-b';
 
                                 return (
-                                    <tr key={item.id} className={`${rowClass} hover:bg-green-50`}>
-                                        <td className="p-2 border">{format(new Date(item.date), "dd/MM/yyyy")}</td>
-                                        <td className="p-2 border">{item.company_name}</td>
-                                        <td className="p-2 border">{item.project_handled_by}</td>
-                                        <td className="p-2 border font-semibold text-orange-600">{formatCurrency(item.balance_due)}</td>
-                                        <td className="p-2 border">
-                                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${status.color === 'red' ? 'bg-red-100 text-red-800' : status.color === 'green' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                                                {status.text}
-                                            </span>
-                                        </td>
-                                        <td className="p-2 border">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                {status.text === 'Completed' && (
-                                                    <button onClick={() => openMoveDialog(item)} className="px-3 py-1 text-xs font-semibold text-white bg-green-600 rounded-md hover:bg-green-700">Next</button>
-                                                )}
-                                                <button onClick={() => router.push(`/crm/pipelines/${pipelineId}/postprocess/${item.id}/view`)} className="px-3 py-1 text-xs text-white bg-blue-500 rounded-md hover:bg-blue-600">View</button>
-                                                {status.text !== 'Completed' && (
-                                                    <button onClick={() => router.push(`/crm/pipelines/${pipelineId}/postprocess/${item.id}/edit`)} className="px-3 py-1 text-xs text-white bg-yellow-500 rounded-md hover:bg-yellow-600">Edit</button>
-                                                )}
-                                                <button onClick={() => openDeleteDialog(item)} className="px-3 py-1 text-xs text-white bg-red-500 rounded-md hover:bg-red-600">Delete</button>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                    <Fragment key={item.id}>
+                                        <tr className={`${rowClass} hover:bg-green-50`}>
+                                            <td className="p-2 border">{format(new Date(item.date), "dd/MM/yyyy")}</td>
+                                            <td className="p-2 border">{item.company_name}</td>
+                                            <td className="p-2 border">{item.project_handled_by}</td>
+                                            <td className="p-2 border font-semibold text-orange-600">{formatCurrency(item.balance_due)}</td>
+                                            <td className="p-2 border">
+                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${status.color === 'red' ? 'bg-red-100 text-red-800' : status.color === 'green' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                    {status.text}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                                    qc2Status.color === 'yellow'
+                                                        ? 'bg-yellow-100 text-yellow-800'
+                                                        : qc2Status.color === 'red'
+                                                        ? 'bg-red-100 text-red-800'
+                                                        : qc2Status.color === 'green'
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-gray-100 text-gray-800'
+                                                }`}>
+                                                    {qc2Status.text}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    {status.text === 'Completed' && (
+                                                        <button onClick={() => openMoveDialog(item)} className="px-3 py-1 text-xs font-semibold text-white bg-green-600 rounded-md hover:bg-green-700">Next</button>
+                                                    )}
+                                                    <button onClick={() => toggleView(item.id)} className="px-3 py-1 text-xs text-white bg-blue-500 rounded-md hover:bg-blue-600 inline-flex items-center gap-1">
+                                                        {expandedId === item.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                        {expandedId === item.id ? "Hide" : "View"}
+                                                    </button>
+                                                    {status.text !== 'Completed' && (
+                                                        <button onClick={() => router.push(`/crm/pipelines/${pipelineId}/postprocess/${item.id}/edit`)} className="px-3 py-1 text-xs text-white bg-yellow-500 rounded-md hover:bg-yellow-600">Edit</button>
+                                                    )}
+                                                    <button onClick={() => openDeleteDialog(item)} className="px-3 py-1 text-xs text-white bg-red-500 rounded-md hover:bg-red-600">Delete</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+
+                                        {expandedId === item.id && (
+                                            <tr className="bg-gray-50 border-b">
+                                                <td colSpan={7} className="p-4 border">
+                                                    <div className="space-y-4">
+                                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                                            <div>
+                                                                <p className="text-xs text-gray-500">Department</p>
+                                                                <p className="font-medium text-gray-800">{item.department || "-"}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs text-gray-500">Contact</p>
+                                                                <p className="font-medium text-gray-800">{item.contact || "-"}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs text-gray-500">State</p>
+                                                                <p className="font-medium text-gray-800">{item.state || "-"}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs text-gray-500">Order Value</p>
+                                                                <p className="font-medium text-gray-800">{formatCurrency(item.order_value)}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-blue-50 border border-blue-100 rounded p-3">
+                                                            <p><span className="font-semibold text-blue-700">Quotation Upload Reference:</span> {item.quotation_upload_reference || item.fileName || "Not uploaded"}</p>
+                                                            <p><span className="font-semibold text-blue-700">Email Confirmation / PO:</span> {item.po_document || "Not uploaded"}</p>
+                                                        </div>
+
+                                                        {item.working_timeline.length > 0 && (
+                                                            <div className="border rounded bg-white">
+                                                                <div className="px-3 py-2 border-b bg-gray-100">
+                                                                    <p className="text-sm font-semibold text-gray-800">Working Timeline</p>
+                                                                </div>
+                                                                <div className="overflow-x-auto">
+                                                                    <table className="w-full text-sm">
+                                                                        <thead className="bg-gray-50">
+                                                                            <tr>
+                                                                                <th className="p-2 text-left">S.No</th>
+                                                                                <th className="p-2 text-left">Description</th>
+                                                                                <th className="p-2 text-left">Deadline</th>
+                                                                                <th className="p-2 text-left">Status</th>
+                                                                                <th className="p-2 text-left">Approved</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {item.working_timeline.map((row, idx) => (
+                                                                                <tr key={idx} className="border-t">
+                                                                                    <td className="p-2">{row.s_no}</td>
+                                                                                    <td className="p-2">{row.description || "-"}</td>
+                                                                                    <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
+                                                                                    <td className="p-2">{row.status || "-"}</td>
+                                                                                    <td className="p-2">{row.approved || "-"}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {item.project_timeline.length > 0 && (
+                                                            <div className="border rounded bg-white">
+                                                                <div className="px-3 py-2 border-b bg-gray-100">
+                                                                    <p className="text-sm font-semibold text-gray-800">Project Timeline</p>
+                                                                </div>
+                                                                <div className="overflow-x-auto">
+                                                                    <table className="w-full text-sm">
+                                                                        <thead className="bg-gray-50">
+                                                                            <tr>
+                                                                                <th className="p-2 text-left">S.No</th>
+                                                                                <th className="p-2 text-left">Description</th>
+                                                                                <th className="p-2 text-left">Deadline</th>
+                                                                                <th className="p-2 text-left">Status</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {item.project_timeline.map((row, idx) => (
+                                                                                <tr key={idx} className="border-t">
+                                                                                    <td className="p-2">{row.s_no}</td>
+                                                                                    <td className="p-2">{row.description || "-"}</td>
+                                                                                    <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
+                                                                                    <td className="p-2">{row.status || "-"}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {Array.isArray(item.supplier_details) && item.supplier_details.length > 0 && (
+                                                            <div className="border rounded bg-white">
+                                                                <div className="px-3 py-2 border-b bg-gray-100">
+                                                                    <p className="text-sm font-semibold text-gray-800">Supplier Details</p>
+                                                                </div>
+                                                                <div className="overflow-x-auto">
+                                                                    <table className="w-full min-w-[900px] text-sm">
+                                                                        <thead className="bg-gray-50">
+                                                                            <tr>
+                                                                                <th className="p-2 text-left">S.No</th>
+                                                                                <th className="p-2 text-left">Type</th>
+                                                                                <th className="p-2 text-left">Manufacturer - Part Number</th>
+                                                                                <th className="p-2 text-left">Vendor</th>
+                                                                                <th className="p-2 text-right">Req Qty</th>
+                                                                                <th className="p-2 text-right">Excise Qty</th>
+                                                                                <th className="p-2 text-right">Total</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {item.supplier_details.map((row, idx) => (
+                                                                                <tr key={idx} className="border-t">
+                                                                                    <td className="p-2">{row.s_no}</td>
+                                                                                    <td className="p-2">{row.component_type || "-"}</td>
+                                                                                    <td className="p-2">{row.manufacturer_part_number || "-"}</td>
+                                                                                    <td className="p-2">{row.vendor_details || "-"}</td>
+                                                                                    <td className="p-2 text-right">{row.req_quantity || 0}</td>
+                                                                                    <td className="p-2 text-right">{row.excise_quantity || 0}</td>
+                                                                                    <td className="p-2 text-right">{(row.total_price || 0).toLocaleString("en-IN")}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
                                 );
                             })
                         ) : (

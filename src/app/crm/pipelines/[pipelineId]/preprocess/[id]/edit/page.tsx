@@ -24,6 +24,7 @@ export type SupplierDetail = {
     qc_status?: "Pending" | "Approved" | "Rejected";
     qc_remark?: string;
     qc_file?: string;
+    qc_file_url?: string;
 };
 
 export type WorkingTimelineItem = {
@@ -74,7 +75,9 @@ export type PreprocessItem = {
     subdeal_department?: string;
     project_handled_by: string;
     quotation_upload_reference?: string;
+    quotation_upload_reference_url?: string;
     po_document?: string;
+    po_document_url?: string;
     working_timeline: WorkingTimelineItem[];
     project_timeline: ProjectTimelineItem[];
     supplier_details: SupplierDetail[];
@@ -124,6 +127,37 @@ export default function EditPreprocessPage() {
         total_price: 0,
     });
 
+    const openQcFile = (fileUrl?: string) => {
+        if (!fileUrl) return;
+
+        if (!fileUrl.startsWith("data:")) {
+            window.open(fileUrl, "_blank", "noopener,noreferrer");
+            return;
+        }
+
+        try {
+            const [meta, base64] = fileUrl.split(",");
+            if (!meta || !base64) {
+                window.open(fileUrl, "_blank", "noopener,noreferrer");
+                return;
+            }
+
+            const mimeMatch = meta.match(/data:(.*?);base64/);
+            const mime = mimeMatch?.[1] || "application/octet-stream";
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+
+            const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+            window.open(blobUrl, "_blank", "noopener,noreferrer");
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        } catch {
+            window.open(fileUrl, "_blank", "noopener,noreferrer");
+        }
+    };
+
     useEffect(() => {
         const user = localStorage.getItem("currentUser") || "Current User";
         setCurrentUser(user);
@@ -144,6 +178,7 @@ export default function EditPreprocessPage() {
                   qc_status: row.qc_status || "Pending",
                   qc_remark: row.qc_remark || "",
                   qc_file: row.qc_file || "",
+                qc_file_url: row.qc_file_url || "",
               }))
             : legacyExpenseDetails.map((row: any, index: number) => {
                   const qty = Number(row.quantity || 0);
@@ -163,6 +198,7 @@ export default function EditPreprocessPage() {
                       qc_status: "Pending",
                       qc_remark: "",
                       qc_file: "",
+                      qc_file_url: "",
                   };
               });
 
@@ -533,8 +569,28 @@ export default function EditPreprocessPage() {
                             <div><label className="text-sm font-medium text-gray-500">Source</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.source}</p></div>
                             <div><label className="text-sm font-medium text-gray-500">Project Handled By</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.project_handled_by || "-"}</p></div>
                             <div><label className="text-sm font-medium text-gray-500">Deadline</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.deadline || "-"}</p></div>
-                            <div><label className="text-sm font-medium text-gray-500">Quotation Upload Reference</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.quotation_upload_reference || formData.fileName || "-"}</p></div>
-                            <div><label className="text-sm font-medium text-gray-500">Email Confirmation / PO</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.po_document || "-"}</p></div>
+                            <div>
+                                <label className="text-sm font-medium text-gray-500">Quotation Upload Reference</label>
+                                <div className="p-2 mt-1 bg-gray-100 rounded">
+                                    <p>{formData.quotation_upload_reference || formData.fileName || "-"}</p>
+                                    {formData.quotation_upload_reference_url && (
+                                        <button type="button" onClick={() => openQcFile(formData.quotation_upload_reference_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                            View file
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium text-gray-500">Email Confirmation / PO</label>
+                                <div className="p-2 mt-1 bg-gray-100 rounded">
+                                    <p>{formData.po_document || "-"}</p>
+                                    {formData.po_document_url && (
+                                        <button type="button" onClick={() => openQcFile(formData.po_document_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                            View file
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </fieldset>
 
@@ -703,7 +759,20 @@ export default function EditPreprocessPage() {
                                                 </span>
                                             </td>
                                             <td className="p-2 max-w-[180px] truncate" title={row.qc_remark || ""}>{row.qc_remark || "-"}</td>
-                                            <td className="p-2 max-w-[160px] truncate" title={row.qc_file || ""}>{row.qc_file || "-"}</td>
+                                            <td className="p-2 max-w-[220px]">
+                                                {row.qc_file ? (
+                                                    <div className="space-y-1">
+                                                        <p className="truncate" title={row.qc_file || ""}>{row.qc_file}</p>
+                                                        {row.qc_file_url && (
+                                                            <button type="button" onClick={() => openQcFile(row.qc_file_url)} className="text-xs text-blue-600 hover:underline">
+                                                                View file
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    "-"
+                                                )}
+                                            </td>
                                             <td className="p-2">
                                                 <div className="flex items-center gap-2">
                                                     <button type="button" onClick={() => openEditSupplierModal(index)} className="p-2 text-blue-500 hover:text-blue-700" title="Edit row">
@@ -733,10 +802,20 @@ export default function EditPreprocessPage() {
                                 <div>
                                     <p className="text-blue-700 font-medium">Quotation Upload Reference</p>
                                     <p className="text-gray-800">{formData.quotation_upload_reference || formData.fileName || "Not uploaded"}</p>
+                                    {formData.quotation_upload_reference_url && (
+                                        <button type="button" onClick={() => openQcFile(formData.quotation_upload_reference_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                            View file
+                                        </button>
+                                    )}
                                 </div>
                                 <div>
                                     <p className="text-blue-700 font-medium">Email Confirmation / PO</p>
                                     <p className="text-gray-800">{formData.po_document || "Not uploaded"}</p>
+                                    {formData.po_document_url && (
+                                        <button type="button" onClick={() => openQcFile(formData.po_document_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                            View file
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>

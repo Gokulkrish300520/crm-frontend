@@ -20,6 +20,7 @@ type SupplierDetail = {
     qc_status?: "Pending" | "Approved" | "Rejected";
     qc_remark?: string;
     qc_file?: string;
+    qc_file_url?: string;
 };
 
 type QcHistoryEntry = {
@@ -75,7 +76,9 @@ type PreprocessItem = {
     project_timeline: ProjectTimelineItem[];
     supplier_details?: SupplierDetail[];
     quotation_upload_reference?: string;
+    quotation_upload_reference_url?: string;
     po_document?: string;
+    po_document_url?: string;
     qc_status?: "Not Sent" | "Pending QC1" | "QC1 Rework Required" | "QC1 Approved";
     qc_review_summary?: string;
     qc_history?: QcHistoryEntry[];
@@ -93,6 +96,37 @@ export default function ViewPreprocessPage() {
     const id = params.id as string;
     const pipelineId = params?.pipelineId as string;
     const [item, setItem] = useState<PreprocessItem | null>(null);
+
+    const openQcFile = (fileUrl?: string) => {
+        if (!fileUrl) return;
+
+        if (!fileUrl.startsWith("data:")) {
+            window.open(fileUrl, "_blank", "noopener,noreferrer");
+            return;
+        }
+
+        try {
+            const [meta, base64] = fileUrl.split(",");
+            if (!meta || !base64) {
+                window.open(fileUrl, "_blank", "noopener,noreferrer");
+                return;
+            }
+
+            const mimeMatch = meta.match(/data:(.*?);base64/);
+            const mime = mimeMatch?.[1] || "application/octet-stream";
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+
+            const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+            window.open(blobUrl, "_blank", "noopener,noreferrer");
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        } catch {
+            window.open(fileUrl, "_blank", "noopener,noreferrer");
+        }
+    };
 
     useEffect(() => {
         if (id) {
@@ -374,7 +408,20 @@ export default function ViewPreprocessPage() {
                                                 <td className="p-3 text-right font-bold text-gray-900">{formatCurrency(detail.total_price)}</td>
                                                 <td className="p-3">{detail.qc_status || "Pending"}</td>
                                                 <td className="p-3">{detail.qc_remark || "-"}</td>
-                                                <td className="p-3">{detail.qc_file || "-"}</td>
+                                                <td className="p-3">
+                                                    {detail.qc_file ? (
+                                                        <div className="space-y-1">
+                                                            <p>{detail.qc_file}</p>
+                                                            {detail.qc_file_url && (
+                                                                <button type="button" onClick={() => openQcFile(detail.qc_file_url)} className="text-xs text-blue-600 hover:underline">
+                                                                    View file
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        "-"
+                                                    )}
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -406,7 +453,14 @@ export default function ViewPreprocessPage() {
                                             <div className="rounded bg-gray-50 p-2">Unit: <span className="font-semibold">{formatCurrency(detail.unit_price)}</span></div>
                                             <div className="rounded bg-gray-50 p-2">QC: <span className="font-semibold">{detail.qc_status || "Pending"}</span></div>
                                             <div className="rounded bg-gray-50 p-2 col-span-2">Remark: <span className="font-semibold">{detail.qc_remark || "-"}</span></div>
-                                            <div className="rounded bg-gray-50 p-2 col-span-2">QC File: <span className="font-semibold">{detail.qc_file || "-"}</span></div>
+                                            <div className="rounded bg-gray-50 p-2 col-span-2">
+                                                QC File: <span className="font-semibold">{detail.qc_file || "-"}</span>
+                                                {detail.qc_file_url && (
+                                                    <button type="button" onClick={() => openQcFile(detail.qc_file_url)} className="ml-2 text-blue-600 hover:underline">
+                                                        View file
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
 
                                         <div className="mt-3 text-right">
@@ -420,8 +474,22 @@ export default function ViewPreprocessPage() {
                             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                                 <h4 className="font-semibold text-blue-900 mb-2">Files From Negotiation</h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                                    <p><span className="font-medium text-blue-800">Quotation Upload Reference:</span> {item.quotation_upload_reference || item.fileName || "Not uploaded"}</p>
-                                    <p><span className="font-medium text-blue-800">Email Confirmation / PO:</span> {item.po_document || "Not uploaded"}</p>
+                                    <div>
+                                        <p><span className="font-medium text-blue-800">Quotation Upload Reference:</span> {item.quotation_upload_reference || item.fileName || "Not uploaded"}</p>
+                                        {item.quotation_upload_reference_url && (
+                                            <button type="button" onClick={() => openQcFile(item.quotation_upload_reference_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                                View file
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <p><span className="font-medium text-blue-800">Email Confirmation / PO:</span> {item.po_document || "Not uploaded"}</p>
+                                        {item.po_document_url && (
+                                            <button type="button" onClick={() => openQcFile(item.po_document_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                                                View file
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 

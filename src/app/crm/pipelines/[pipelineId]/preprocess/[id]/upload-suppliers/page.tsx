@@ -1,9 +1,9 @@
 "use client";
 
+import { Download, Trash2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import * as XLSX from "xlsx";
-import { Download, Trash2 } from "lucide-react";
 
 export type SupplierDetail = {
     s_no: number;
@@ -47,7 +47,6 @@ export default function UploadSuppliersPage() {
                 "S.No": 1,
                 "Manufacturer - Part Number": "PART-001",
                 "Vendor Details": "Supplier A",
-                "Currency": "INR",
                 "Req Quantity": 100,
                 "Unit Price": 150,
             },
@@ -55,7 +54,6 @@ export default function UploadSuppliersPage() {
                 "S.No": 2,
                 "Manufacturer - Part Number": "PART-002",
                 "Vendor Details": "Supplier B",
-                "Currency": "USD",
                 "Req Quantity": 50,
                 "Unit Price": 200,
             },
@@ -66,7 +64,6 @@ export default function UploadSuppliersPage() {
             { wch: 10 },
             { wch: 25 },
             { wch: 25 },
-            { wch: 12 },
             { wch: 15 },
             { wch: 12 },
         ];
@@ -94,7 +91,7 @@ export default function UploadSuppliersPage() {
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
                 // Validate headers
-                const requiredHeaders = ["S.No", "Manufacturer - Part Number", "Vendor Details", "Currency", "Req Quantity", "Unit Price"];
+                const requiredHeaders = ["S.No", "Manufacturer - Part Number", "Vendor Details", "Req Quantity", "Unit Price"];
                 if (jsonData.length === 0) {
                     setError("Excel file is empty. Please add supplier data.");
                     setIsLoading(false);
@@ -118,7 +115,7 @@ export default function UploadSuppliersPage() {
                         s_no: Number(row["S.No"]) || index + 1,
                         manufacturer_part_number: String(row["Manufacturer - Part Number"] || "").trim(),
                         vendor_details: String(row["Vendor Details"] || "").trim(),
-                        currency: String(row["Currency"] || "INR").trim(),
+                        currency: "INR", // Default currency - user will change manually in edit modal
                         req_quantity: reqQty,
                         unit_price: unitPrice,
                         // These will be empty - user will fill them manually
@@ -132,16 +129,6 @@ export default function UploadSuppliersPage() {
                         qc_file: "",
                     };
                 });
-
-                // Validate currency options
-                const invalidCurrencies = parsedData
-                    .filter((row) => !currencyOptions.includes(row.currency as string))
-                    .map((row) => row.currency);
-                if (invalidCurrencies.length > 0) {
-                    setError(`Invalid currency values: ${[...new Set(invalidCurrencies)].join(", ")}. Valid options: ${currencyOptions.join(", ")}`);
-                    setIsLoading(false);
-                    return;
-                }
 
                 setUploadedData(parsedData);
             } catch (err) {
@@ -207,7 +194,7 @@ export default function UploadSuppliersPage() {
                 <header className="mb-6">
                     <h1 className="text-3xl font-bold text-green-700">Upload Suppliers from Excel</h1>
                     <p className="text-gray-600 mt-2">
-                        Download the sample template, fill in supplier data (except component type, percentage, and excise quantity which you'll enter manually), and upload the file.
+                        Download the sample template, fill in supplier data (except currency, component type, percentage, and excise quantity which you'll enter manually), and upload the file.
                     </p>
                 </header>
 
@@ -265,13 +252,12 @@ export default function UploadSuppliersPage() {
                         </p>
 
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[900px] table-fixed">
+                            <table className="w-full min-w-[800px] table-fixed">
                                 <thead>
                                     <tr className="bg-gray-50 text-left text-sm font-medium text-gray-600">
                                         <th className="p-2">S.No</th>
                                         <th className="p-2">Manufacturer - Part Number</th>
                                         <th className="p-2">Vendor Details</th>
-                                        <th className="p-2">Currency</th>
                                         <th className="p-2">Req Quantity</th>
                                         <th className="p-2">Unit Price</th>
                                         <th className="p-2">Action</th>
@@ -287,7 +273,6 @@ export default function UploadSuppliersPage() {
                                             <td className="p-2 max-w-[180px] truncate" title={row.vendor_details || ""}>
                                                 {row.vendor_details || "-"}
                                             </td>
-                                            <td className="p-2">{row.currency}</td>
                                             <td className="p-2 text-right">{row.req_quantity}</td>
                                             <td className="p-2 text-right">{(row.unit_price || 0).toLocaleString("en-IN")}</td>
                                             <td className="p-2">
@@ -310,6 +295,7 @@ export default function UploadSuppliersPage() {
                                 <strong>Next steps after adding:</strong>
                             </p>
                             <ul className="text-sm text-blue-700 list-disc list-inside space-y-1">
+                                <li>Select <strong>Currency</strong> (INR, USD, EUR, etc.) for each row</li>
                                 <li>Select <strong>Component Type</strong> (Active/Passive) for each row</li>
                                 <li>Enter <strong>Percentage</strong> for each row</li>
                                 <li>

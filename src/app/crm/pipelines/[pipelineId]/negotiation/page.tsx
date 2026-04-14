@@ -44,7 +44,9 @@ export type Negotiation = {
 export type PreprocessItem = Omit<Negotiation, 'quotation_status' | 'closed_reason' | 'followup_datetime'> & {
     project_handled_by: string;
     quotation_upload_reference?: string;
+    quotation_upload_reference_url?: string;
     po_document?: string;
+    po_document_url?: string;
     order_value: number;
     advance_payment: { amount: number; bank_details: string; date: string; };
     expense: number;
@@ -106,7 +108,9 @@ export default function NegotiationListPage() {
         project_handled_by: "",
         deadline: "",
         quotation_upload_reference: "",
+        quotation_upload_reference_url: "",
         po_document: "",
+        po_document_url: "",
     });
 
     useEffect(() => {
@@ -129,7 +133,14 @@ export default function NegotiationListPage() {
     const closeDialog = () => {
         setDialogState({ isOpen: false, mode: 'none', item: null, title: '', message: '' });
         setReason("");
-        setConvertForm({ project_handled_by: "", deadline: "", quotation_upload_reference: "", po_document: "" });
+        setConvertForm({
+            project_handled_by: "",
+            deadline: "",
+            quotation_upload_reference: "",
+            quotation_upload_reference_url: "",
+            po_document: "",
+            po_document_url: "",
+        });
     };
 
     const openDeleteDialog = (item: Negotiation) => {
@@ -141,7 +152,9 @@ export default function NegotiationListPage() {
             project_handled_by: item.team_member || "",
             deadline: item.deadline || "",
             quotation_upload_reference: item.fileName || "",
+            quotation_upload_reference_url: "",
             po_document: item.po_document || "",
+            po_document_url: "",
         });
         setDialogState({ isOpen: true, mode: 'convert', item, title: 'Confirm Conversion', message: `This will convert the deal for "${item.company_name}" and move it to Preprocess.` });
     };
@@ -176,8 +189,10 @@ export default function NegotiationListPage() {
             deadline: convertForm.deadline,
             project_handled_by: convertForm.project_handled_by,
             quotation_upload_reference: convertForm.quotation_upload_reference,
+            quotation_upload_reference_url: convertForm.quotation_upload_reference_url,
             fileName: convertForm.quotation_upload_reference,
             po_document: convertForm.po_document,
+            po_document_url: convertForm.po_document_url,
             order_value: 0,
             advance_payment: { amount: 0, bank_details: "", date: "" },
             expense: 0,
@@ -317,7 +332,20 @@ export default function NegotiationListPage() {
                                         type="file"
                                         onChange={(e) => {
                                             const file = e.target.files?.[0];
-                                            setConvertForm((prev) => ({ ...prev, quotation_upload_reference: file?.name || "" }));
+                                            if (!file) {
+                                                setConvertForm((prev) => ({ ...prev, quotation_upload_reference: "", quotation_upload_reference_url: "" }));
+                                                return;
+                                            }
+
+                                            const reader = new FileReader();
+                                            reader.onload = () => {
+                                                setConvertForm((prev) => ({
+                                                    ...prev,
+                                                    quotation_upload_reference: file.name,
+                                                    quotation_upload_reference_url: typeof reader.result === "string" ? reader.result : "",
+                                                }));
+                                            };
+                                            reader.readAsDataURL(file);
                                         }}
                                         className="w-full p-2 mt-1 border rounded bg-white"
                                     />
@@ -331,7 +359,20 @@ export default function NegotiationListPage() {
                                         type="file"
                                         onChange={(e) => {
                                             const file = e.target.files?.[0];
-                                            setConvertForm((prev) => ({ ...prev, po_document: file?.name || "" }));
+                                            if (!file) {
+                                                setConvertForm((prev) => ({ ...prev, po_document: "", po_document_url: "" }));
+                                                return;
+                                            }
+
+                                            const reader = new FileReader();
+                                            reader.onload = () => {
+                                                setConvertForm((prev) => ({
+                                                    ...prev,
+                                                    po_document: file.name,
+                                                    po_document_url: typeof reader.result === "string" ? reader.result : "",
+                                                }));
+                                            };
+                                            reader.readAsDataURL(file);
                                         }}
                                         className="w-full p-2 mt-1 border rounded bg-white"
                                     />
