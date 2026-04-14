@@ -1,5 +1,6 @@
 "use client";
 
+import { setIndexedDbItem } from "@/utils/indexedDbStorage";
 import { format } from "date-fns";
 import { Bell, CheckCircle, ChevronDown, ChevronUp, Clock, Eye, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -57,7 +58,39 @@ export default function ApprovalsPage() {
         setPreprocessData(preprocess);
     };
 
-    const handleApprove = (itemId: string, pipelineId: string) => {
+    const offloadDataUrls = async (value: unknown, itemId: string, path: string[] = []): Promise<unknown> => {
+        if (Array.isArray(value)) {
+            return Promise.all(value.map((entry, index) => offloadDataUrls(entry, itemId, [...path, String(index)])));
+        }
+
+        if (value && typeof value === "object") {
+            const result: Record<string, unknown> = {};
+
+            for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+                if (typeof entry === "string" && entry.startsWith("data:")) {
+                    const storageKey = `postprocess_file_${itemId}_${[...path, key].join("_")}`;
+
+                    try {
+                        await setIndexedDbItem(storageKey, entry);
+                        const keyField = key.endsWith("_url") ? key.replace(/_url$/, "_file_key") : `${key}_file_key`;
+                        result[key] = "";
+                        result[keyField] = storageKey;
+                    } catch (error) {
+                        console.error("Failed to offload data URL to IndexedDB", error);
+                        result[key] = "";
+                    }
+                } else {
+                    result[key] = await offloadDataUrls(entry, itemId, [...path, key]);
+                }
+            }
+
+            return result;
+        }
+
+        return value;
+    };
+
+    const handleApprove = async (itemId: string, pipelineId: string) => {
         const data = [...preprocessData];
         const itemIndex = data.findIndex(item => item.id === itemId);
         
@@ -90,7 +123,9 @@ export default function ApprovalsPage() {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { approval_status, approval_requested_date, approval_requested_by, last_reminder_date, ...itemWithoutApprovalFields } = postprocessItem;
             
-            postprocessData.push(itemWithoutApprovalFields);
+            const sanitizedPostprocessItem = await offloadDataUrls(itemWithoutApprovalFields, itemId);
+
+            postprocessData.push(sanitizedPostprocessItem);
             localStorage.setItem("postprocessData", JSON.stringify(postprocessData));
             
             // REMOVE the item from preprocess data (it's now in postprocess)

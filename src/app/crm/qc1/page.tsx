@@ -1,5 +1,6 @@
 "use client";
 
+import { getIndexedDbItem, setIndexedDbItem } from "@/utils/indexedDbStorage";
 import { format } from "date-fns";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -20,6 +21,7 @@ type SupplierDetail = {
   qc_remark?: string;
   qc_file?: string;
   qc_file_url?: string;
+  qc_file_key?: string;
 };
 
 type WorkingTimelineItem = {
@@ -79,7 +81,22 @@ export default function Qc1DashboardPage() {
   const [items, setItems] = useState<PreprocessItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const openQcFile = (fileUrl?: string) => {
+  const openQcFile = async (fileKey?: string, fallbackUrl?: string) => {
+    let fileUrl = fallbackUrl;
+
+    if (fileKey) {
+      const stored = await getIndexedDbItem<Blob | string>(fileKey);
+      if (stored instanceof Blob) {
+        const blobUrl = URL.createObjectURL(stored);
+        window.open(blobUrl, "_blank", "noopener,noreferrer");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        return;
+      }
+      if (typeof stored === "string") {
+        fileUrl = stored;
+      }
+    }
+
     if (!fileUrl) return;
 
     if (!fileUrl.startsWith("data:")) {
@@ -110,16 +127,53 @@ export default function Qc1DashboardPage() {
     }
   };
 
-  const loadData = () => {
-    const preprocessData = JSON.parse(localStorage.getItem("preprocessData") || "[]");
+  const loadData = async () => {
+    const preprocessData: PreprocessItem[] = JSON.parse(localStorage.getItem("preprocessData") || "[]");
+    let migrated = false;
+
+    const normalizedData: PreprocessItem[] = [];
+    for (const item of preprocessData) {
+      const normalizedSupplierRows: SupplierDetail[] = [];
+
+      for (const row of item.supplier_details || []) {
+        let nextRow: SupplierDetail = { ...row };
+
+        if (row.qc_file_url && !row.qc_file_key) {
+          const fileKey = `qc1_file_${item.id}_${row.s_no}`;
+          try {
+            await setIndexedDbItem(fileKey, row.qc_file_url);
+            nextRow = { ...nextRow, qc_file_key: fileKey };
+          } catch (error) {
+            console.error("Failed to migrate QC1 file to IndexedDB", error);
+          }
+        }
+
+        if (nextRow.qc_file_url) {
+          migrated = true;
+        }
+
+        const { qc_file_url, ...rowWithoutUrl } = nextRow;
+        normalizedSupplierRows.push(rowWithoutUrl);
+      }
+
+      normalizedData.push({ ...item, supplier_details: normalizedSupplierRows });
+    }
+
+    if (migrated) {
+      localStorage.setItem("preprocessData", JSON.stringify(normalizedData));
+    }
+
     const qcQueue = preprocessData.filter(
       (item: PreprocessItem) => item.qc_status === "Pending QC1" || item.qc_status === "QC1 Rework Required"
     );
-    setItems(qcQueue);
+    const normalizedQueue = normalizedData.filter(
+      (item: PreprocessItem) => item.qc_status === "Pending QC1" || item.qc_status === "QC1 Rework Required"
+    );
+    setItems(normalizedQueue);
   };
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   const pendingCount = useMemo(
@@ -154,24 +208,28 @@ export default function Qc1DashboardPage() {
   const handleRowFileChange = (itemId: string, rowIndex: number, file: File | null) => {
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const fileUrl = typeof reader.result === "string" ? reader.result : "";
+    const fileKey = `qc1_file_${itemId}_${rowIndex}_${Date.now()}`;
 
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.id !== itemId) return item;
-          const supplier_details = item.supplier_details.map((row, idx) =>
-            idx === rowIndex
-              ? { ...row, qc_file: file.name, qc_file_url: fileUrl }
-              : row
-          );
-          return { ...item, supplier_details };
-        })
-      );
-    };
+    void (async () => {
+      try {
+        await setIndexedDbItem(fileKey, file);
 
-    reader.readAsDataURL(file);
+        setItems((prev) =>
+          prev.map((item) => {
+            if (item.id !== itemId) return item;
+            const supplier_details = item.supplier_details.map((row, idx) =>
+              idx === rowIndex
+                ? { ...row, qc_file: file.name, qc_file_key: fileKey }
+                : row
+            );
+            return { ...item, supplier_details };
+          })
+        );
+      } catch (error) {
+        console.error("Failed to save QC1 file", error);
+        alert("Failed to save file. Please try again.");
+      }
+    })();
   };
 
   const handleSubmitQcReview = (itemId: string) => {
@@ -189,7 +247,7 @@ export default function Qc1DashboardPage() {
         qc_status: row.qc_status || "Pending",
         qc_remark: row.qc_remark || "",
         qc_file: row.qc_file || "",
-        qc_file_url: row.qc_file_url || "",
+        qc_file_key: row.qc_file_key || "",
       }));
 
       const allApproved = withDefaults.length > 0 && withDefaults.every((row) => row.qc_status === "Approved");
@@ -233,7 +291,7 @@ export default function Qc1DashboardPage() {
     });
 
     localStorage.setItem("preprocessData", JSON.stringify(updatedPreprocess));
-    loadData();
+    void loadData();
     alert("QC1 review submitted successfully.");
   };
 
@@ -351,7 +409,7 @@ export default function Qc1DashboardPage() {
                           <div>
                             <p><span className="font-medium text-blue-800">Quotation Upload Reference:</span> {item.quotation_upload_reference || item.fileName || "Not uploaded"}</p>
                             {item.quotation_upload_reference_url && (
-                              <button type="button" onClick={() => openQcFile(item.quotation_upload_reference_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                              <button type="button" onClick={() => void openQcFile(undefined, item.quotation_upload_reference_url)} className="text-xs text-blue-600 hover:underline mt-1">
                                 View file
                               </button>
                             )}
@@ -359,7 +417,7 @@ export default function Qc1DashboardPage() {
                           <div>
                             <p><span className="font-medium text-blue-800">Email Confirmation / PO:</span> {item.po_document || "Not uploaded"}</p>
                             {item.po_document_url && (
-                              <button type="button" onClick={() => openQcFile(item.po_document_url)} className="text-xs text-blue-600 hover:underline mt-1">
+                              <button type="button" onClick={() => void openQcFile(undefined, item.po_document_url)} className="text-xs text-blue-600 hover:underline mt-1">
                                 View file
                               </button>
                             )}
@@ -503,10 +561,10 @@ export default function Qc1DashboardPage() {
                                   {row.qc_file && (
                                     <div className="mt-1 space-y-1">
                                       <p className="text-xs text-gray-500">{row.qc_file}</p>
-                                      {row.qc_file_url && (
+                                      {(row.qc_file_key || row.qc_file_url) && (
                                         <button
                                           type="button"
-                                          onClick={() => openQcFile(row.qc_file_url)}
+                                          onClick={() => void openQcFile(row.qc_file_key, row.qc_file_url)}
                                           className="text-xs text-blue-600 hover:underline"
                                         >
                                           View file
