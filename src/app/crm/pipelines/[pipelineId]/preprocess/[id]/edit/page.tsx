@@ -16,6 +16,7 @@ export type SupplierDetail = {
     vendor_details: string;
     currency: string;
     percentage: number;
+    board_qty: number;
     req_quantity: number;
     excise_quantity: number;
     quantity: number;
@@ -25,6 +26,8 @@ export type SupplierDetail = {
     qc_remark?: string;
     qc_file?: string;
     qc_file_url?: string;
+    admin_component_status?: "Not Approved" | "Approved" | "Rework";
+    admin_component_remark?: string;
 };
 
 export type WorkingTimelineItem = {
@@ -33,6 +36,8 @@ export type WorkingTimelineItem = {
     deadline: string;
     approved: "Yes" | "Rework";
     notes?: string;
+    admin_status?: "Not Approved" | "Approved" | "Rework";
+    admin_remark?: string;
 };
 
 export type ProjectTimelineItem = {
@@ -40,6 +45,8 @@ export type ProjectTimelineItem = {
     description: string;
     deadline: string;
     notes?: string;
+    admin_status?: "Not Approved" | "Approved" | "Rework";
+    admin_remark?: string;
 };
 
 export type QcHistoryEntry = {
@@ -120,6 +127,7 @@ export default function EditPreprocessPage() {
         vendor_details: "",
         currency: "INR",
         percentage: 0,
+        board_qty: 0,
         req_quantity: 0,
         excise_quantity: 0,
         quantity: 0,
@@ -173,13 +181,27 @@ export default function EditPreprocessPage() {
 
         const legacyExpenseDetails = Array.isArray(itemToEdit.expense_details) ? itemToEdit.expense_details : [];
         const supplierDetails: SupplierDetail[] = Array.isArray(itemToEdit.supplier_details)
-            ? itemToEdit.supplier_details.map((row: SupplierDetail) => ({
-                  ...row,
-                  qc_status: row.qc_status || "Pending",
-                  qc_remark: row.qc_remark || "",
-                  qc_file: row.qc_file || "",
-                qc_file_url: row.qc_file_url || "",
-              }))
+                        ? itemToEdit.supplier_details.map((row: SupplierDetail) => {
+                                    const qty = Number(row.quantity || 0);
+                                    const reqQty = Number(row.req_quantity || 0);
+                                    const rawBoardQty = Number((row as SupplierDetail & { board_qty?: number }).board_qty);
+                                    const boardQty = Number.isFinite(rawBoardQty)
+                                            ? rawBoardQty
+                                            : qty > 0
+                                            ? Number((reqQty / qty).toFixed(4))
+                                            : 0;
+
+                                    return {
+                                            ...row,
+                                            board_qty: boardQty,
+                                            qc_status: row.qc_status || "Pending",
+                                            qc_remark: row.qc_remark || "",
+                                            qc_file: row.qc_file || "",
+                                            qc_file_url: row.qc_file_url || "",
+                                            admin_component_status: row.admin_component_status || "Not Approved",
+                                            admin_component_remark: row.admin_component_remark || "",
+                                    };
+                            })
             : legacyExpenseDetails.map((row: any, index: number) => {
                   const qty = Number(row.quantity || 0);
                   const unitPrice = Number(row.unit_price || 0);
@@ -190,6 +212,7 @@ export default function EditPreprocessPage() {
                       vendor_details: String(row.supplier_details || ""),
                       currency: "INR",
                       percentage: 0,
+                      board_qty: 0,
                       req_quantity: qty,
                       excise_quantity: 0,
                       quantity: qty,
@@ -199,6 +222,8 @@ export default function EditPreprocessPage() {
                       qc_remark: "",
                       qc_file: "",
                       qc_file_url: "",
+                      admin_component_status: "Not Approved",
+                      admin_component_remark: "",
                   };
               });
 
@@ -226,6 +251,30 @@ export default function EditPreprocessPage() {
 
         setFormData(sanitizedItem);
     }, [id]);
+
+    useEffect(() => {
+        setFormData((prev) => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                working_timeline: (prev.working_timeline || []).map((row) => ({
+                    ...row,
+                    admin_status: row.admin_status || (row.approved === "Yes" ? "Approved" : row.approved === "Rework" ? "Rework" : "Not Approved"),
+                    admin_remark: row.admin_remark || "",
+                })),
+                project_timeline: (prev.project_timeline || []).map((row) => ({
+                    ...row,
+                    admin_status: row.admin_status || "Not Approved",
+                    admin_remark: row.admin_remark || "",
+                })),
+                supplier_details: (prev.supplier_details || []).map((row) => ({
+                    ...row,
+                    admin_component_status: row.admin_component_status || "Not Approved",
+                    admin_component_remark: row.admin_component_remark || "",
+                })),
+            };
+        });
+    }, []);
 
     useEffect(() => {
         if (!formData) return;
@@ -271,6 +320,8 @@ export default function EditPreprocessPage() {
                     deadline: "",
                     approved: "Rework",
                     notes: "",
+                    admin_status: "Not Approved",
+                    admin_remark: "",
                 };
                 return { ...prev, working_timeline: [...prev.working_timeline, newRow] };
             }
@@ -279,6 +330,8 @@ export default function EditPreprocessPage() {
                 description: "",
                 deadline: "",
                 notes: "",
+                admin_status: "Not Approved",
+                admin_remark: "",
             };
             return { ...prev, project_timeline: [...prev.project_timeline, newRow] };
         });
@@ -295,13 +348,18 @@ export default function EditPreprocessPage() {
     };
 
     const updateDerivedSupplierFields = (row: SupplierDetail): SupplierDetail => {
-        const reqQty = Number(row.req_quantity) || 0;
+        const boardQty = Number(row.board_qty) || 0;
+        const qty = Number(row.quantity) || 0;
+        const reqQty = Number((boardQty * qty).toFixed(2));
         const pct = Number(row.percentage) || 0;
         const unitPrice = Number(row.unit_price) || 0;
         const exciseQuantity = Number((reqQty + (reqQty * pct) / 100).toFixed(2));
 
         return {
             ...row,
+            board_qty: boardQty,
+            quantity: qty,
+            req_quantity: reqQty,
             excise_quantity: exciseQuantity,
             total_price: Number((exciseQuantity * unitPrice).toFixed(2)),
         };
@@ -333,6 +391,7 @@ export default function EditPreprocessPage() {
             vendor_details: "",
             currency: "INR",
             percentage: 0,
+            board_qty: 0,
             req_quantity: 0,
             excise_quantity: 0,
             quantity: 0,
@@ -458,6 +517,21 @@ export default function EditPreprocessPage() {
             approval_status: "Pending Approval" as const,
             approval_requested_date: new Date().toISOString(),
             approval_requested_by: currentUser,
+            working_timeline: (formData.working_timeline || []).map((row) => ({
+                ...row,
+                admin_status: row.admin_status || "Not Approved",
+                admin_remark: row.admin_remark || "",
+            })),
+            project_timeline: (formData.project_timeline || []).map((row) => ({
+                ...row,
+                admin_status: row.admin_status || "Not Approved",
+                admin_remark: row.admin_remark || "",
+            })),
+            supplier_details: (formData.supplier_details || []).map((row) => ({
+                ...row,
+                admin_component_status: row.admin_component_status || "Not Approved",
+                admin_component_remark: row.admin_component_remark || "",
+            })),
             stage_history: [...(formData.stage_history || []), { stage: "Sent for Admin Approval", date: new Date().toISOString() }],
         };
 
@@ -551,6 +625,12 @@ export default function EditPreprocessPage() {
     };
 
     if (!formData) return <div className="p-8">Loading...</div>;
+
+    const showQcFeedbackColumns =
+        Boolean(formData.qc_reviewed_date) ||
+        (Array.isArray(formData.qc_history) && formData.qc_history.length > 0) ||
+        formData.qc_status === "QC1 Approved" ||
+        formData.qc_status === "QC1 Rework Required";
 
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-50">
@@ -648,7 +728,8 @@ export default function EditPreprocessPage() {
                                         <th className="p-2">S.No</th>
                                         <th className="p-2">Description <span className="text-red-500">*</span></th>
                                         <th className="p-2">Deadline <span className="text-red-500">*</span></th>
-                                        <th className="p-2">Approved</th>
+                                        <th className="p-2">Admin Status</th>
+                                        <th className="p-2">Admin Remark</th>
                                         <th className="p-2">Notes</th>
                                         <th className="p-2">Action</th>
                                     </tr>
@@ -659,12 +740,8 @@ export default function EditPreprocessPage() {
                                             <td className="p-2"><input type="number" value={row.s_no} onChange={(e) => handleTimelineChange(index, "s_no", parseInt(e.target.value) || 0, "working_timeline")} className="w-16 p-2 border rounded"/></td>
                                             <td className="p-2"><input type="text" value={row.description} onChange={(e) => handleTimelineChange(index, "description", e.target.value, "working_timeline")} required className="w-full p-2 border rounded"/></td>
                                             <td className="p-2"><input type="date" value={row.deadline} onChange={(e) => handleTimelineChange(index, "deadline", e.target.value, "working_timeline")} required className="w-full p-2 border rounded"/></td>
-                                            <td className="p-2">
-                                                <select value={row.approved} onChange={(e) => handleTimelineChange(index, "approved", e.target.value as WorkingTimelineItem["approved"], "working_timeline")} className="w-full p-2 border rounded bg-white">
-                                                    <option>Rework</option>
-                                                    <option>Yes</option>
-                                                </select>
-                                            </td>
+                                            <td className="p-2"><span className={`inline-flex px-2 py-1 rounded text-xs font-semibold ${row.admin_status === "Approved" ? "bg-green-100 text-green-800" : row.admin_status === "Rework" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-700"}`}>{row.admin_status || "Not Approved"}</span></td>
+                                            <td className="p-2"><textarea value={row.admin_remark || ""} readOnly rows={2} className="w-full p-2 border rounded text-sm bg-gray-50"/></td>
                                             <td className="p-2"><textarea value={row.notes || ""} onChange={(e) => handleTimelineChange(index, "notes", e.target.value, "working_timeline")} rows={2} className="w-full p-2 border rounded text-sm"/></td>
                                             <td className="p-2"><button type="button" onClick={() => removeTimelineRow(index, "working_timeline")} className="p-2 text-red-500 hover:text-red-700"><Trash2 size={16} /></button></td>
                                         </tr>
@@ -684,6 +761,8 @@ export default function EditPreprocessPage() {
                                         <th className="p-2">S.No</th>
                                         <th className="p-2">Description <span className="text-red-500">*</span></th>
                                         <th className="p-2">Deadline <span className="text-red-500">*</span></th>
+                                        <th className="p-2">Admin Status</th>
+                                        <th className="p-2">Admin Remark</th>
                                         <th className="p-2">Notes</th>
                                         <th className="p-2">Action</th>
                                     </tr>
@@ -694,6 +773,8 @@ export default function EditPreprocessPage() {
                                             <td className="p-2"><input type="number" value={row.s_no} onChange={(e) => handleTimelineChange(index, "s_no", parseInt(e.target.value) || 0, "project_timeline")} className="w-16 p-2 border rounded"/></td>
                                             <td className="p-2"><input type="text" value={row.description} onChange={(e) => handleTimelineChange(index, "description", e.target.value, "project_timeline")} required className="w-full p-2 border rounded"/></td>
                                             <td className="p-2"><input type="date" value={row.deadline} onChange={(e) => handleTimelineChange(index, "deadline", e.target.value, "project_timeline")} required className="w-full p-2 border rounded"/></td>
+                                            <td className="p-2"><span className={`inline-flex px-2 py-1 rounded text-xs font-semibold ${row.admin_status === "Approved" ? "bg-green-100 text-green-800" : row.admin_status === "Rework" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-700"}`}>{row.admin_status || "Not Approved"}</span></td>
+                                            <td className="p-2"><textarea value={row.admin_remark || ""} readOnly rows={2} className="w-full p-2 border rounded text-sm bg-gray-50"/></td>
                                             <td className="p-2"><textarea value={row.notes || ""} onChange={(e) => handleTimelineChange(index, "notes", e.target.value, "project_timeline")} rows={2} className="w-full p-2 border rounded text-sm"/></td>
                                             <td className="p-2"><button type="button" onClick={() => removeTimelineRow(index, "project_timeline")} className="p-2 text-red-500 hover:text-red-700"><Trash2 size={16} /></button></td>
                                         </tr>
@@ -716,14 +797,17 @@ export default function EditPreprocessPage() {
                                         <th className="p-2">Vendor Details</th>
                                         <th className="p-2">Currency</th>
                                         <th className="p-2">Percentage</th>
+                                        <th className="p-2">Quantity</th>
+                                        <th className="p-2">Board Qty</th>
                                         <th className="p-2">Req Quantity</th>
                                         <th className="p-2">Excise Quantity</th>
-                                        <th className="p-2">Quantity</th>
                                         <th className="p-2">Unit Price</th>
                                         <th className="p-2">Total Price</th>
                                         <th className="p-2">QC Status</th>
-                                        <th className="p-2">QC Remark</th>
-                                        <th className="p-2">QC File</th>
+                                        {showQcFeedbackColumns && <th className="p-2">QC Remark</th>}
+                                        {showQcFeedbackColumns && <th className="p-2">QC File</th>}
+                                        <th className="p-2">Admin Status</th>
+                                        <th className="p-2">Admin Remark</th>
                                         <th className="p-2">Action</th>
                                     </tr>
                                 </thead>
@@ -742,9 +826,10 @@ export default function EditPreprocessPage() {
                                             <td className="p-2 max-w-[220px] truncate" title={row.vendor_details || ""}>{row.vendor_details || "-"}</td>
                                             <td className="p-2">{row.currency}</td>
                                             <td className="p-2 text-right">{row.percentage}%</td>
+                                            <td className="p-2 text-right">{row.quantity}</td>
+                                            <td className="p-2 text-right">{row.board_qty || 0}</td>
                                             <td className="p-2 text-right">{row.req_quantity}</td>
                                             <td className="p-2 text-right">{row.excise_quantity}</td>
-                                            <td className="p-2 text-right">{row.quantity}</td>
                                             <td className="p-2 text-right">{(row.unit_price || 0).toLocaleString("en-IN")}</td>
                                             <td className="p-2 text-right font-semibold">{(row.total_price || 0).toLocaleString("en-IN")}</td>
                                             <td className="p-2">
@@ -758,21 +843,31 @@ export default function EditPreprocessPage() {
                                                     {row.qc_status || "Pending"}
                                                 </span>
                                             </td>
-                                            <td className="p-2 max-w-[180px] truncate" title={row.qc_remark || ""}>{row.qc_remark || "-"}</td>
-                                            <td className="p-2 max-w-[220px]">
-                                                {row.qc_file ? (
-                                                    <div className="space-y-1">
-                                                        <p className="truncate" title={row.qc_file || ""}>{row.qc_file}</p>
-                                                        {row.qc_file_url && (
-                                                            <button type="button" onClick={() => openQcFile(row.qc_file_url)} className="text-xs text-blue-600 hover:underline">
-                                                                View file
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    "-"
-                                                )}
+                                            {showQcFeedbackColumns && (
+                                                <td className="p-2 max-w-[180px] truncate" title={row.qc_remark || ""}>{row.qc_remark || "-"}</td>
+                                            )}
+                                            {showQcFeedbackColumns && (
+                                                <td className="p-2 max-w-[220px]">
+                                                    {row.qc_file ? (
+                                                        <div className="space-y-1">
+                                                            <p className="truncate" title={row.qc_file || ""}>{row.qc_file}</p>
+                                                            {row.qc_file_url && (
+                                                                <button type="button" onClick={() => openQcFile(row.qc_file_url)} className="text-xs text-blue-600 hover:underline">
+                                                                    View file
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        "-"
+                                                    )}
+                                                </td>
+                                            )}
+                                            <td className="p-2">
+                                                <span className={`inline-flex px-2 py-1 rounded text-xs font-semibold ${row.admin_component_status === "Approved" ? "bg-green-100 text-green-800" : row.admin_component_status === "Rework" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-700"}`}>
+                                                    {row.admin_component_status || "Not Approved"}
+                                                </span>
                                             </td>
+                                            <td className="p-2 max-w-[180px] truncate" title={row.admin_component_remark || ""}>{row.admin_component_remark || "-"}</td>
                                             <td className="p-2">
                                                 <div className="flex items-center gap-2">
                                                     <button type="button" onClick={() => openEditSupplierModal(index)} className="p-2 text-blue-500 hover:text-blue-700" title="Edit row">
@@ -974,16 +1069,20 @@ export default function EditPreprocessPage() {
                                 </div>
 
                                 <div>
+                                    <label className="block text-sm font-medium text-gray-700">Quantity</label>
+                                    <input type="number" value={newSupplierRow.quantity} onChange={(e) => handleNewSupplierChange("quantity", parseFloat(e.target.value) || 0)} className="w-full p-2 mt-1 border rounded" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Board Qty</label>
+                                    <input type="number" value={newSupplierRow.board_qty || 0} onChange={(e) => handleNewSupplierChange("board_qty", parseFloat(e.target.value) || 0)} className="w-full p-2 mt-1 border rounded" />
+                                </div>
+                                <div>
                                     <label className="block text-sm font-medium text-gray-700">Req Quantity</label>
-                                    <input type="number" value={newSupplierRow.req_quantity} onChange={(e) => handleNewSupplierChange("req_quantity", parseFloat(e.target.value) || 0)} className="w-full p-2 mt-1 border rounded" />
+                                    <input type="number" value={newSupplierRow.req_quantity} readOnly className="w-full p-2 mt-1 border rounded bg-gray-100" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700">Excise Quantity</label>
                                     <input type="number" value={newSupplierRow.excise_quantity} readOnly className="w-full p-2 mt-1 border rounded bg-gray-100" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Quantity</label>
-                                    <input type="number" value={newSupplierRow.quantity} onChange={(e) => handleNewSupplierChange("quantity", parseFloat(e.target.value) || 0)} className="w-full p-2 mt-1 border rounded" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700">Unit Price</label>

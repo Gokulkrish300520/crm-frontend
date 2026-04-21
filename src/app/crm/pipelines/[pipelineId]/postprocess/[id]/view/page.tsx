@@ -1,24 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
 import { format, isPast, isValid } from "date-fns";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 // --- Type Definitions ---
 export type WorkingTimelineItem = {
   s_no: number;
   description: string;
   deadline: string;
-  status: "Completed" | "Over Due";
+    status: "Completed" | "Over Due" | "Working Within Deadline";
   approved: "Yes" | "Rework";
-  assigned_to?: string;
 };
 
 export type ProjectTimelineItem = {
   s_no: number;
   description: string;
   deadline: string;
-  status: "Completed" | "Over Due";
+    status: "Completed" | "Over Due" | "Working Within Deadline";
   final_fileName?: string;
 };
 
@@ -45,6 +44,13 @@ export type PostProcessItem = {
   project_timeline: ProjectTimelineItem[];
   expense_bill_format: string;
   post_process_status: "Pending" | "Completed";
+};
+
+type DeliveryItem = {
+        id: string;
+        source_postprocess_id?: string;
+        completed_date?: string;
+        stage_history?: Array<{ stage?: string; date?: string }>;
 };
 
 
@@ -111,6 +117,32 @@ export default function ViewPostProcessPage() {
 
     const formatCurrency = (value: number | undefined) => (value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
 
+    const deliveryData: DeliveryItem[] = JSON.parse(localStorage.getItem("deliveryData") || "[]");
+    const matchingDelivery = deliveryData.find((entry) => String(entry.source_postprocess_id || entry.id) === String(item.id));
+    const deliveryCompletionDate =
+        matchingDelivery?.completed_date ||
+        matchingDelivery?.stage_history?.find((entry) => String(entry.stage || "").toLowerCase().includes("all components reached delivery"))?.date;
+
+    const getDeadlineDerivedState = (
+        deadline: string
+    ): { status: "Completed" | "Over Due" | "Working Within Deadline"; approved: "Yes" | "Rework" } => {
+        if (!deadline || !isValid(new Date(deadline))) return { status: "Working Within Deadline", approved: "Rework" };
+        const deadlineDate = new Date(deadline);
+        const today = new Date();
+        deadlineDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+
+        if (deliveryCompletionDate && isValid(new Date(deliveryCompletionDate))) {
+            const completionDate = new Date(deliveryCompletionDate);
+            completionDate.setHours(0, 0, 0, 0);
+            if (completionDate > deadlineDate) return { status: "Over Due", approved: "Rework" };
+            return { status: "Completed", approved: "Yes" };
+        }
+
+        if (deadlineDate < today) return { status: "Over Due", approved: "Rework" };
+        return { status: "Working Within Deadline", approved: "Rework" };
+    };
+
     const getProjectStatus = (item: PostProcessItem) => {
         const allTimelines = [...item.working_timeline, ...item.project_timeline];
         if (allTimelines.every(t => t.status === "Completed")) return { text: "Completed", color: "green" };
@@ -143,7 +175,6 @@ export default function ViewPostProcessPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t">
                             <DetailItem label="Company Name" value={item.company_name} />
                             <DetailItem label="Department" value={item.department} />
-                            <DetailItem label="Project Handled By" value={item.project_handled_by} />
                             <DetailItem label="Subdeal Department" value={item.subdeal_department} />
                             <DetailItem label="Date Started" value={format(new Date(item.date), "dd MMMM, yyyy")} />
                             <DetailItem label="Final Deadline" value={format(new Date(item.deadline), "dd MMMM, yyyy")} />
@@ -170,8 +201,8 @@ export default function ViewPostProcessPage() {
                         <h2 className="text-lg font-semibold text-green-800 border-b pb-2 mb-4">Working Timeline</h2>
                         <div className="overflow-x-auto">
                             <table className="w-full mt-2 text-sm">
-                                <thead className="bg-gray-50 text-left font-medium text-gray-600"><tr><th className="p-2">S.No</th><th className="p-2">Description</th><th className="p-2">Assigned To</th><th className="p-2">Deadline</th><th className="p-2">Status</th><th className="p-2">Approved</th></tr></thead>
-                                <tbody>{item.working_timeline.map((t) => (<tr key={t.s_no} className="border-b"><td className="p-2">{t.s_no}</td><td className="p-2">{t.description}</td><td className="p-2 font-medium">{t.assigned_to || 'N/A'}</td><td className="p-2">{t.deadline && isValid(new Date(t.deadline)) ? format(new Date(t.deadline), "dd MMM, yyyy") : "—"}</td><td className="p-2"><span className={`px-2 py-0.5 rounded-full text-xs ${t.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{t.status}</span></td><td className="p-2"><span className={`font-semibold ${t.approved === 'Yes' ? 'text-green-600' : 'text-yellow-600'}`}>{t.approved}</span></td></tr>))}</tbody>
+                                <thead className="bg-gray-50 text-left font-medium text-gray-600"><tr><th className="p-2">S.No</th><th className="p-2">Description</th><th className="p-2">Deadline</th><th className="p-2">Status</th><th className="p-2">Approved</th></tr></thead>
+                                <tbody>{item.working_timeline.map((t) => { const derived = getDeadlineDerivedState(t.deadline); return (<tr key={t.s_no} className="border-b"><td className="p-2">{t.s_no}</td><td className="p-2">{t.description}</td><td className="p-2">{t.deadline && isValid(new Date(t.deadline)) ? format(new Date(t.deadline), "dd MMM, yyyy") : "—"}</td><td className="p-2"><span className={`px-2 py-0.5 rounded-full text-xs ${derived.status === 'Completed' ? 'bg-green-100 text-green-800' : derived.status === 'Working Within Deadline' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>{derived.status}</span></td><td className="p-2"><span className={`font-semibold ${derived.approved === 'Yes' ? 'text-green-600' : 'text-yellow-600'}`}>{derived.approved}</span></td></tr>); })}</tbody>
                             </table>
                             {item.working_timeline.length === 0 && <p className="mt-4 text-gray-500">No working timeline entries.</p>}
                         </div>
@@ -182,7 +213,7 @@ export default function ViewPostProcessPage() {
                         <div className="overflow-x-auto">
                             <table className="w-full mt-2 text-sm">
                                 <thead className="bg-gray-50 text-left font-medium text-gray-600"><tr><th className="p-2">S.No</th><th className="p-2">Description</th><th className="p-2">Deadline</th><th className="p-2">Status</th><th className="p-2">Final File</th></tr></thead>
-                                <tbody>{item.project_timeline.map((t) => (<tr key={t.s_no} className="border-b"><td className="p-2">{t.s_no}</td><td className="p-2">{t.description}</td><td className="p-2">{t.deadline && isValid(new Date(t.deadline)) ? format(new Date(t.deadline), "dd MMM, yyyy") : "—"}</td><td className="p-2"><span className={`px-2 py-0.5 rounded-full text-xs ${t.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{t.status}</span></td><td className="p-2 text-blue-600 hover:underline">{t.final_fileName || 'N/A'}</td></tr>))}</tbody>
+                                <tbody>{item.project_timeline.map((t) => { const derived = getDeadlineDerivedState(t.deadline); return (<tr key={t.s_no} className="border-b"><td className="p-2">{t.s_no}</td><td className="p-2">{t.description}</td><td className="p-2">{t.deadline && isValid(new Date(t.deadline)) ? format(new Date(t.deadline), "dd MMM, yyyy") : "—"}</td><td className="p-2"><span className={`px-2 py-0.5 rounded-full text-xs ${derived.status === 'Completed' ? 'bg-green-100 text-green-800' : derived.status === 'Working Within Deadline' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>{derived.status}</span></td><td className="p-2 text-blue-600 hover:underline">{t.final_fileName || 'N/A'}</td></tr>); })}</tbody>
                             </table>
                             {item.project_timeline.length === 0 && <p className="mt-4 text-gray-500">No project timeline entries found.</p>}
                         </div>

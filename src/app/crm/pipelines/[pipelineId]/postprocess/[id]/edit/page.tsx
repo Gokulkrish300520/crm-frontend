@@ -1,5 +1,6 @@
 "use client";
 
+import { setIndexedDbItem } from "@/utils/indexedDbStorage";
 import { Pencil, Trash2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -13,17 +14,20 @@ export type WorkingTimelineItem = {
     s_no: number;
     description: string;
     deadline: string;
-    status: "Completed" | "Over Due";
+    status: "Completed" | "Over Due" | "Working Within Deadline";
     approved: "Yes" | "Rework";
-    assigned_to?: string;
+    admin_status?: "Not Approved" | "Approved" | "Rework";
+    admin_remark?: string;
 };
 
 export type ProjectTimelineItem = {
     s_no: number;
     description: string;
     deadline: string;
-    status: "Completed" | "Over Due";
+    status: "Completed" | "Over Due" | "Working Within Deadline";
     final_fileName?: string;
+    admin_status?: "Not Approved" | "Approved" | "Rework";
+    admin_remark?: string;
 };
 
 export type SupplierDetail = {
@@ -40,6 +44,7 @@ export type SupplierDetail = {
     total_price: number;
     test_report_upload?: string;
     test_report_upload_url?: string;
+    test_report_upload_file_key?: string;
     payment_terms?: string;
     dispatch_date?: string;
     sf_number?: string;
@@ -57,14 +62,12 @@ export type SupplierDetail = {
     qc2_submitted_by?: string;
     qc2_reviewed_date?: string;
     qc2_reviewed_by?: string;
-    payment_request_status?: "Not Requested" | "Pending Admin Approval" | "Payment Completed";
-    payment_request_date?: string;
-    payment_request_by?: string;
-    payment_receipt_url?: string;
-    payment_completed_date?: string;
-    payment_completed_by?: string;
     qc2_image_upload?: string;
     qc2_image_upload_url?: string;
+    qc2_image_upload_file_key?: string;
+    qc2_file?: string;
+    qc2_file_url?: string;
+    qc2_file_key?: string;
 };
 
 export type PostProcessItem = {
@@ -100,11 +103,6 @@ export type PostProcessItem = {
     stage_history?: StageHistory[];
 };
 
-export type PaymentPendingItem = Omit<PostProcessItem, "post_process_status"> & {
-    payment_status: "Pending";
-    stage_history?: StageHistory[];
-};
-
 export default function EditPostProcessPage() {
     const router = useRouter();
     const params = useParams();
@@ -115,6 +113,7 @@ export default function EditPostProcessPage() {
     const [selectedSupplierRows, setSelectedSupplierRows] = useState<number[]>([]);
     const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
     const [editingSupplierIndex, setEditingSupplierIndex] = useState<number | null>(null);
+    const [supplierModalMode, setSupplierModalMode] = useState<"shipment" | "component">("shipment");
     const [supplierDraft, setSupplierDraft] = useState<SupplierDetail | null>(null);
     const [dialogState, setDialogState] = useState({
         isOpen: false,
@@ -124,9 +123,35 @@ export default function EditPostProcessPage() {
         isValidation: false,
     });
 
-    const departments = ["Fab", "EMS", "Component", "R&D", "Sales"];
-    const teamMembers = ["Alice", "Bob", "Charlie", "David", "Eve"];
     const expenseOptions = ["Format 1", "Format 2", "Format 3", "Format 4", "Format 5"];
+
+    const deriveTimelineState = (
+        deadline: string,
+        deliveryCompletionDate?: string
+    ): { status: "Completed" | "Over Due" | "Working Within Deadline"; approved: "Yes" | "Rework" } => {
+        const deadlineDate = deadline ? new Date(deadline) : null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (deadlineDate) {
+            deadlineDate.setHours(0, 0, 0, 0);
+        }
+
+        if (deliveryCompletionDate) {
+            const completionDate = new Date(deliveryCompletionDate);
+            completionDate.setHours(0, 0, 0, 0);
+            if (deadlineDate && completionDate > deadlineDate) {
+                return { status: "Over Due", approved: "Rework" };
+            }
+            return { status: "Completed", approved: "Yes" };
+        }
+
+        if (!deadlineDate) return { status: "Working Within Deadline", approved: "Rework" };
+        if (deadlineDate < today) {
+            return { status: "Over Due", approved: "Rework" };
+        }
+        return { status: "Working Within Deadline", approved: "Rework" };
+    };
 
     const openFile = (fileUrl?: string) => {
         if (!fileUrl) return;
@@ -167,6 +192,17 @@ export default function EditPostProcessPage() {
         const itemToEdit = data.find((item) => item.id === id);
         if (!itemToEdit) return;
 
+        const deliveryData = JSON.parse(localStorage.getItem("deliveryData") || "[]");
+        const matchingDelivery = deliveryData.find(
+            (entry: { source_postprocess_id?: string; id?: string }) =>
+                String(entry.source_postprocess_id || entry.id) === String(itemToEdit.id)
+        );
+        const deliveryCompletionDate =
+            matchingDelivery?.completed_date ||
+            matchingDelivery?.stage_history?.find((entry: { stage?: string; date?: string }) =>
+                String(entry.stage || "").toLowerCase().includes("all components reached delivery")
+            )?.date;
+
         if (typeof itemToEdit.advance_payment === "number" || !itemToEdit.advance_payment) {
             itemToEdit.advance_payment = {
                 amount: (itemToEdit.advance_payment as unknown as number) || 0,
@@ -190,6 +226,7 @@ export default function EditPostProcessPage() {
                   total_price: Number(row.total_price || 0),
                   test_report_upload: row.test_report_upload || "",
                   test_report_upload_url: row.test_report_upload_url || "",
+                  test_report_upload_file_key: row.test_report_upload_file_key || "",
                   payment_terms: row.payment_terms || "",
                   dispatch_date: row.dispatch_date || "",
                   sf_number: row.sf_number || "",
@@ -207,21 +244,36 @@ export default function EditPostProcessPage() {
                   qc2_submitted_by: row.qc2_submitted_by,
                   qc2_reviewed_date: row.qc2_reviewed_date,
                   qc2_reviewed_by: row.qc2_reviewed_by,
-                  payment_request_status: row.payment_request_status || "Not Requested",
-                  payment_request_date: row.payment_request_date,
-                  payment_request_by: row.payment_request_by,
-                  payment_receipt_url: row.payment_receipt_url,
-                  payment_completed_date: row.payment_completed_date,
-                  payment_completed_by: row.payment_completed_by,
                   qc2_image_upload: row.qc2_image_upload || "",
                   qc2_image_upload_url: row.qc2_image_upload_url || "",
+                                    qc2_image_upload_file_key: row.qc2_image_upload_file_key || "",
+                                    qc2_file: row.qc2_file || "",
+                                    qc2_file_url: row.qc2_file_url || "",
+                                    qc2_file_key: row.qc2_file_key || "",
               }))
             : [];
 
         const sanitizedItem: PostProcessItem = {
             ...itemToEdit,
-            working_timeline: Array.isArray(itemToEdit.working_timeline) ? itemToEdit.working_timeline : [],
-            project_timeline: Array.isArray(itemToEdit.project_timeline) ? itemToEdit.project_timeline : [],
+            working_timeline: Array.isArray(itemToEdit.working_timeline)
+                ? itemToEdit.working_timeline.map((row) => {
+                      const derived = deriveTimelineState(row.deadline || "", deliveryCompletionDate);
+                      return {
+                          ...row,
+                          status: derived.status,
+                          approved: derived.approved,
+                      };
+                  })
+                : [],
+            project_timeline: Array.isArray(itemToEdit.project_timeline)
+                ? itemToEdit.project_timeline.map((row) => {
+                      const derived = deriveTimelineState(row.deadline || "", deliveryCompletionDate);
+                      return {
+                          ...row,
+                          status: derived.status,
+                      };
+                  })
+                : [],
             supplier_details: supplierDetails,
             qc2_status: itemToEdit.qc2_status || "Not Sent",
             stage_history: Array.isArray(itemToEdit.stage_history) ? itemToEdit.stage_history : [],
@@ -255,7 +307,27 @@ export default function EditPostProcessPage() {
     ) => {
         setFormData((prev) => {
             if (!prev) return null;
-            const updatedTimeline = prev[timelineType].map((item, i) => (i === index ? { ...item, [field]: value } : item));
+            const updatedTimeline = prev[timelineType].map((item, i) => {
+                if (i !== index) return item;
+                const nextItem = { ...item, [field]: value };
+
+                if (field === "deadline") {
+                    const derived = deriveTimelineState(String(value || ""));
+                    if (timelineType === "working_timeline") {
+                        return {
+                            ...(nextItem as WorkingTimelineItem),
+                            status: derived.status,
+                            approved: derived.approved,
+                        };
+                    }
+                    return {
+                        ...(nextItem as ProjectTimelineItem),
+                        status: derived.status,
+                    };
+                }
+
+                return nextItem;
+            });
             return { ...prev, [timelineType]: updatedTimeline };
         });
     };
@@ -268,9 +340,8 @@ export default function EditPostProcessPage() {
                     s_no: prev.working_timeline.length + 1,
                     description: "",
                     deadline: "",
-                    status: "Over Due",
+                    status: "Working Within Deadline",
                     approved: "Rework",
-                    assigned_to: "",
                 };
                 return { ...prev, working_timeline: [...prev.working_timeline, newRow] };
             }
@@ -278,7 +349,7 @@ export default function EditPostProcessPage() {
                 s_no: prev.project_timeline.length + 1,
                 description: "",
                 deadline: "",
-                status: "Over Due",
+                status: "Working Within Deadline",
                 final_fileName: "",
             };
             return { ...prev, project_timeline: [...prev.project_timeline, newRow] };
@@ -312,6 +383,69 @@ export default function EditPostProcessPage() {
         };
     };
 
+    const moveSupplierBackToPreprocess = async (supplierRow: SupplierDetail) => {
+        const currentFormData = formData;
+        if (!currentFormData) return;
+
+        const now = new Date().toISOString();
+        const preprocessData = JSON.parse(localStorage.getItem("preprocessData") || "[]");
+        const preprocessSupplier = {
+            s_no: 1,
+            component_type: supplierRow.component_type,
+            manufacturer_part_number: supplierRow.manufacturer_part_number,
+            vendor_details: supplierRow.vendor_details,
+            currency: supplierRow.currency || "INR",
+            percentage: Number(supplierRow.percentage || 0),
+            req_quantity: Number(supplierRow.req_quantity || 0),
+            excise_quantity: Number(supplierRow.excise_quantity || 0),
+            quantity: Number(supplierRow.quantity || 0),
+            unit_price: Number(supplierRow.unit_price || 0),
+            total_price: Number(supplierRow.total_price || 0),
+            qc_status: "Pending" as const,
+            qc_remark: "",
+            qc_file: "",
+            qc_file_url: "",
+            admin_component_status: "Not Approved" as const,
+            admin_component_remark: "",
+            origin_postprocess_id: currentFormData.id,
+            origin_supplier_s_no: supplierRow.s_no,
+        };
+
+        const preprocessItem = {
+            id: crypto.randomUUID(),
+            pipelineId,
+            date: currentFormData.date,
+            department: currentFormData.department,
+            company_name: currentFormData.company_name,
+            contact: currentFormData.contact,
+            state: currentFormData.state,
+            deadline: currentFormData.deadline,
+            description: currentFormData.description,
+            fileName: currentFormData.fileName,
+            source: currentFormData.source,
+            customer_notes: currentFormData.customer_notes,
+            order_value: Number(supplierRow.total_price || 0),
+            advance_payment: currentFormData.advance_payment,
+            expense: Number(supplierRow.total_price || 0),
+            profit: 0,
+            balance_due: Number(supplierRow.total_price || 0),
+            subdeal_department: currentFormData.subdeal_department,
+            project_handled_by: currentFormData.project_handled_by,
+            working_timeline: currentFormData.working_timeline.map((row) => ({ ...row, admin_status: "Not Approved", admin_remark: row.admin_remark || "" })),
+            project_timeline: currentFormData.project_timeline.map((row) => ({ ...row, admin_status: "Not Approved", admin_remark: row.admin_remark || "" })),
+            supplier_details: [preprocessSupplier],
+            expense_bill_format: currentFormData.expense_bill_format,
+            approval_status: "Modification",
+            qc_status: "Not Sent",
+            approval_requested_date: now,
+            approval_requested_by: localStorage.getItem("currentUser") || currentFormData.project_handled_by || "Current User",
+            stage_history: [...(currentFormData.stage_history || []), { stage: "Returned from Post Process for Reapproval", date: now }],
+        };
+
+        preprocessData.push(preprocessItem);
+        localStorage.setItem("preprocessData", JSON.stringify(preprocessData));
+    };
+
     const removeSupplierRow = (indexToRemove: number) => {
         setFormData((prev) => {
             if (!prev) return null;
@@ -334,10 +468,11 @@ export default function EditPostProcessPage() {
         });
     };
 
-    const openEditSupplierModal = (index: number) => {
+    const openEditSupplierModal = (index: number, mode: "shipment" | "component" = "shipment") => {
         const row = formData?.supplier_details?.[index];
         if (!row) return;
         setEditingSupplierIndex(index);
+        setSupplierModalMode(mode);
         setSupplierDraft({ ...row });
         setIsSupplierModalOpen(true);
     };
@@ -345,6 +480,7 @@ export default function EditPostProcessPage() {
     const closeSupplierModal = () => {
         setIsSupplierModalOpen(false);
         setEditingSupplierIndex(null);
+        setSupplierModalMode("shipment");
         setSupplierDraft(null);
     };
 
@@ -390,14 +526,47 @@ export default function EditPostProcessPage() {
 
     const saveSupplierModal = () => {
         if (editingSupplierIndex === null || !supplierDraft) return;
-        setFormData((prev) => {
-            if (!prev) return null;
-            const rows = (prev.supplier_details || []).map((row, i) =>
-                i === editingSupplierIndex ? updateDerivedSupplierFields({ ...supplierDraft, s_no: row.s_no }) : row
-            );
-            return { ...prev, supplier_details: rows };
-        });
-        closeSupplierModal();
+        const currentFormData = formData;
+        if (!currentFormData) return;
+
+        const originalRow = currentFormData.supplier_details?.[editingSupplierIndex];
+        if (!originalRow) return;
+
+        // Shipment/QC2 updates should stay in Post Process and not restart approvals.
+        if (supplierModalMode === "shipment") {
+            setFormData((prev) => {
+                if (!prev) return null;
+                const rows = (prev.supplier_details || []).map((row, i) =>
+                    i === editingSupplierIndex ? updateDerivedSupplierFields({ ...supplierDraft, s_no: row.s_no }) : row
+                );
+                return { ...prev, supplier_details: rows };
+            });
+            closeSupplierModal();
+            return;
+        }
+
+        void (async () => {
+            await moveSupplierBackToPreprocess(updateDerivedSupplierFields({ ...supplierDraft, s_no: originalRow.s_no }));
+
+            setFormData((prev) => {
+                if (!prev) return null;
+                const remainingRows = (prev.supplier_details || [])
+                    .filter((_, i) => i !== editingSupplierIndex)
+                    .map((row, i) => ({ ...row, s_no: i + 1 }));
+                return { ...prev, supplier_details: remainingRows };
+            });
+
+            closeSupplierModal();
+
+            if ((currentFormData.supplier_details || []).length === 1) {
+                const allPostprocess = JSON.parse(localStorage.getItem("postprocessData") || "[]");
+                const updatedPostprocess = allPostprocess.filter((item: PostProcessItem) => item.id !== currentFormData.id);
+                localStorage.setItem("postprocessData", JSON.stringify(updatedPostprocess));
+                router.push(`/crm/pipelines/${pipelineId}/postprocess`);
+            }
+
+            alert("Edited supplier row sent back to Pre-Process for QC1 and admin approval.");
+        })();
     };
 
     const handleSupplierFileUpload = (index: number, file: File | null) => {
@@ -422,6 +591,12 @@ export default function EditPostProcessPage() {
         );
     };
 
+    const requiresQc2Approval = (row: SupplierDetail) => {
+        const reqQty = Number(row.req_quantity) || 0;
+        if (row.component_type === "Active") return reqQty > 50;
+        return reqQty > 1000;
+    };
+
     const sendSelectedForQc2Approval = () => {
         if (!formData) return;
         if (selectedSupplierRows.length === 0) {
@@ -430,15 +605,25 @@ export default function EditPostProcessPage() {
         }
 
         const rows = formData.supplier_details || [];
+        const nonQcRows = selectedSupplierRows.filter((index) => {
+            const row = rows[index];
+            return row ? !requiresQc2Approval(row) : false;
+        });
+
+        if (nonQcRows.length > 0) {
+            alert("Some selected rows do not require QC2 approval based on quantity thresholds. Use 'Move Selected to Dispatch' for those rows.");
+            return;
+        }
+
         const invalidIndex = selectedSupplierRows.find((index) => {
             const row = rows[index];
             if (!row) return true;
-            return !row.payment_terms || !row.dispatch_date || !row.sf_number || !row.sf_date || !row.awb_number || !row.awb_date ||
+            return !row.dispatch_date || !row.sf_number || !row.sf_date || !row.awb_number || !row.awb_date ||
                 !row.total_weight_kg || !row.tracking_number || !row.courier_details || !row.duty_details || !row.shipment_details;
         });
 
         if (typeof invalidIndex === "number") {
-            alert(`Please fill all shipment/payment fields for supplier row ${invalidIndex + 1} before sending to QC2.`);
+            alert(`Please fill all shipment fields for supplier row ${invalidIndex + 1} before sending to QC2.`);
             return;
         }
 
@@ -476,64 +661,110 @@ export default function EditPostProcessPage() {
         alert("Selected supplier items sent for QC2 approval.");
     };
 
-    const sendPaymentRequest = (supplierIndex: number) => {
+    const moveSelectedToDispatch = async () => {
         if (!formData) return;
-        const row = formData.supplier_details?.[supplierIndex];
-        if (!row || row.qc2_status !== "Approved") {
-            alert("Only QC2 approved items can request payment.");
+        if (selectedSupplierRows.length === 0) {
+            alert("Please select at least one supplier item to move to Dispatch stage.");
             return;
         }
+
+        const rows = formData.supplier_details || [];
+        const blockedRow = selectedSupplierRows.find((index) => {
+            const row = rows[index];
+            if (!row) return true;
+            return requiresQc2Approval(row) && row.qc2_status !== "Approved";
+        });
+
+        if (typeof blockedRow === "number") {
+            alert(`Supplier row ${blockedRow + 1} requires QC2 approval (Active > 50 or Passive > 1000). Approve it in QC2 before moving to Dispatch.`);
+            return;
+        }
+
+        const dispatchRows = await Promise.all(
+            selectedSupplierRows
+                .map((index) => rows[index])
+                .filter(Boolean)
+                .map(async (row) => {
+                    const nextRow: SupplierDetail & {
+                        total_weight_display: string;
+                        excess_duty_display: string;
+                    } = {
+                        ...row,
+                        total_weight_display: "-",
+                        excess_duty_display: "-",
+                    };
+
+                    if (row.test_report_upload_url && !row.test_report_upload_file_key) {
+                        const fileKey = `dispatch_emp_file_${formData.id}_${row.s_no}_${Date.now()}`;
+                        await setIndexedDbItem(fileKey, row.test_report_upload_url);
+                        nextRow.test_report_upload_file_key = fileKey;
+                    }
+
+                    if (row.qc2_image_upload_url && !row.qc2_image_upload_file_key) {
+                        const fileKey = `dispatch_qc2_image_${formData.id}_${row.s_no}_${Date.now()}`;
+                        await setIndexedDbItem(fileKey, row.qc2_image_upload_url);
+                        nextRow.qc2_image_upload_file_key = fileKey;
+                    }
+
+                    if (row.qc2_file_url && !row.qc2_file_key) {
+                        const fileKey = `dispatch_qc2_file_${formData.id}_${row.s_no}_${Date.now()}`;
+                        await setIndexedDbItem(fileKey, row.qc2_file_url);
+                        nextRow.qc2_file_key = fileKey;
+                    }
+
+                    delete nextRow.test_report_upload_url;
+                    delete nextRow.qc2_image_upload_url;
+                    delete nextRow.qc2_file_url;
+
+                    return nextRow;
+                })
+        );
 
         const now = new Date().toISOString();
         const currentUser = localStorage.getItem("currentUser") || "Current User";
 
-        setFormData((prev) => {
-            if (!prev) return null;
-            const rows = (prev.supplier_details || []).map((r, i) =>
-                i === supplierIndex
-                    ? {
-                          ...r,
-                          payment_request_status: "Pending Admin Approval" as const,
-                          payment_request_date: now,
-                          payment_request_by: currentUser,
-                      }
-                    : r
-            );
-            return { ...prev, supplier_details: rows };
-        });
-
-        // Save to localStorage
-        const allData: PostProcessItem[] = JSON.parse(localStorage.getItem("postprocessData") || "[]");
-        const updatedForm = { ...formData, supplier_details: formData.supplier_details?.map((r, i) =>
-            i === supplierIndex
-                ? {
-                      ...r,
-                      payment_request_status: "Pending Admin Approval" as const,
-                      payment_request_date: now,
-                      payment_request_by: currentUser,
-                  }
-                : r
-        ) };
-        const updatedAll = allData.map((item) => (item.id === id ? updatedForm : item));
-        localStorage.setItem("postprocessData", JSON.stringify(updatedAll));
-
-        const { payment_receipt_url, qc2_image_upload_url, test_report_upload_url, ...safeSupplierRow } = row;
-
-        // Save payment request to admin approval queue
-        const paymentRequests = JSON.parse(localStorage.getItem("paymentApprovalRequests") || "[]");
-        paymentRequests.push({
+        const dispatchData = JSON.parse(localStorage.getItem("dispatchData") || "[]");
+        dispatchData.push({
             id: crypto.randomUUID(),
-            postprocessId: id,
+            source_postprocess_id: formData.id,
             pipelineId,
-            supplierIndex,
-            supplierRow: safeSupplierRow,
-            requestedDate: now,
-            requestedBy: currentUser,
-            status: "Pending",
+            company_name: formData.company_name,
+            department: formData.department,
+            project_handled_by: formData.project_handled_by,
+            created_date: formData.date,
+            dispatch_status: "Draft",
+            dispatch_submitted_by: currentUser,
+            dispatch_submitted_date: now,
+            supplier_details: dispatchRows,
+            stage_history: [
+                ...(formData.stage_history || []),
+                { stage: `Moved ${dispatchRows.length} supplier item(s) to Dispatch`, date: now },
+            ],
         });
-        localStorage.setItem("paymentApprovalRequests", JSON.stringify(paymentRequests));
+        localStorage.setItem("dispatchData", JSON.stringify(dispatchData));
 
-        alert("Payment request sent to admin for approval.");
+        const remainingRows = rows
+            .filter((_, index) => !selectedSupplierRows.includes(index))
+            .map((row, index) => ({ ...row, s_no: index + 1 }));
+
+        const allPostprocess: PostProcessItem[] = JSON.parse(localStorage.getItem("postprocessData") || "[]");
+        const updatedPostprocess = allPostprocess
+            .map((item) => (item.id === formData.id ? { ...item, supplier_details: remainingRows } : item))
+            .filter((item) => item.id !== formData.id || (Array.isArray(item.supplier_details) && item.supplier_details.length > 0));
+
+        localStorage.setItem("postprocessData", JSON.stringify(updatedPostprocess));
+
+        const updatedForm = { ...formData, supplier_details: remainingRows };
+        setFormData(updatedForm);
+        setSelectedSupplierRows([]);
+
+        if (remainingRows.length === 0) {
+            alert("Selected rows moved to Dispatch. No supplier rows left in this Post Process item.");
+            router.push(`/crm/pipelines/${pipelineId}/postprocess`);
+            return;
+        }
+
+        alert("Selected rows moved to Dispatch stage.");
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -548,8 +779,8 @@ export default function EditPostProcessPage() {
                 setDialogState({
                     isOpen: true,
                     title: "Project Complete",
-                    message: "All tasks are complete and approved. This will move the project to 'Payment Pending'. Proceed?",
-                    onConfirm: () => proceedToPaymentPending(),
+                    message: "All tasks are complete and approved. Mark this post process project as completed?",
+                    onConfirm: () => proceedWithUpdate(),
                     isValidation: false,
                 });
             } else {
@@ -582,27 +813,6 @@ export default function EditPostProcessPage() {
         router.push(`/crm/pipelines/${pipelineId}/postprocess`);
     };
 
-    const proceedToPaymentPending = () => {
-        if (!formData) return;
-        const { post_process_status: _, ...rest } = formData;
-        const newPaymentPendingItem: PaymentPendingItem = {
-            ...rest,
-            payment_status: "Pending",
-            stage_history: [
-                ...(formData.stage_history || []),
-                { stage: "Moved to Payment Pending", date: new Date().toISOString() },
-            ],
-        };
-
-        const paymentData = JSON.parse(localStorage.getItem("paymentPendingData") || "[]");
-        localStorage.setItem("paymentPendingData", JSON.stringify([...paymentData, newPaymentPendingItem]));
-
-        const postprocessData = JSON.parse(localStorage.getItem("postprocessData") || "[]");
-        const updatedPostprocess = postprocessData.filter((item: PostProcessItem) => item.id !== id);
-        localStorage.setItem("postprocessData", JSON.stringify(updatedPostprocess));
-        router.push(`/crm/pipelines/${pipelineId}/payment-pending`);
-    };
-
     if (!formData) return <div className="p-8">Loading...</div>;
 
     return (
@@ -612,8 +822,8 @@ export default function EditPostProcessPage() {
                     <h1 className="text-3xl font-bold text-green-700">Edit Post Process</h1>
                 </header>
 
-                <form onSubmit={handleSubmit} className="space-y-8">
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                <form onSubmit={handleSubmit} className="space-y-8 flex flex-col">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-1">
                         <legend className="text-lg font-semibold text-gray-600">Original Details</legend>
                         <div className="grid grid-cols-1 gap-5 mt-4 md:grid-cols-4">
                             <div><label className="text-sm font-medium text-gray-500">Company</label><p className="p-2 mt-1 bg-gray-100 rounded">{formData.company_name}</p></div>
@@ -623,7 +833,7 @@ export default function EditPostProcessPage() {
                         </div>
                     </fieldset>
 
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-2">
                         <legend className="text-lg font-semibold text-green-800">Financials & Billing</legend>
                         <div className="grid grid-cols-1 gap-6 mt-4 md:grid-cols-2 lg:grid-cols-3">
                             <div><label className="block font-medium">Order Value</label><input type="number" name="order_value" value={formData.order_value} onChange={handleChange} className="w-full p-2 mt-1 border rounded" /></div>
@@ -633,21 +843,8 @@ export default function EditPostProcessPage() {
                         </div>
                     </fieldset>
 
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
-                        <legend className="text-lg font-semibold text-green-800">Team & Handovers</legend>
-                        <div className="grid grid-cols-1 gap-6 mt-4 md:grid-cols-2">
-                            <div><label className="block font-medium">Subdeal Department</label><input list="departments" name="subdeal_department" value={formData.subdeal_department || ""} onChange={handleChange} className="w-full p-2 mt-1 border rounded" /><datalist id="departments">{departments.map((d) => <option key={d} value={d} />)}</datalist></div>
-                            <div><label className="block font-medium">Project Handled By</label><input list="teamMembers" name="project_handled_by" value={formData.project_handled_by} onChange={handleChange} required className="w-full p-2 mt-1 border rounded" /><datalist id="teamMembers">{teamMembers.map((m) => <option key={m} value={m} />)}</datalist></div>
-                        </div>
-                    </fieldset>
-
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-6">
                         <legend className="text-lg font-semibold text-green-800">Supplier Details (Post Process)</legend>
-
-                        <div className="flex flex-wrap items-center gap-3 mb-4">
-                            <button type="button" onClick={sendSelectedForQc2Approval} className="px-4 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700">Send Selected Items for QC2 Approval</button>
-                            <span className="text-xs text-gray-500">Selected: {selectedSupplierRows.length}</span>
-                        </div>
 
                         <div className="overflow-x-auto border rounded">
                             <table className="w-full min-w-[1200px] text-sm table-fixed">
@@ -664,7 +861,6 @@ export default function EditPostProcessPage() {
                                         <th className="p-2 text-right">Total Price</th>
                                         <th className="p-2 text-left">QC2 Image</th>
                                         <th className="p-2 text-left">QC2</th>
-                                        <th className="p-2 text-left">Payment</th>
                                         <th className="p-2 text-left">Action</th>
                                     </tr>
                                 </thead>
@@ -702,33 +898,21 @@ export default function EditPostProcessPage() {
                                                         ? "bg-yellow-100 text-yellow-800"
                                                         : "bg-gray-100 text-gray-800"
                                                 }`}>
-                                                    {row.qc2_status || "Not Sent"}
+                                                    {row.qc2_status === "Rejected" || row.qc2_status === "QC2 Rework Required" ? "Not Approved" : row.qc2_status || "Not Sent"}
                                                 </span>
                                             </td>
                                             <td className="p-2">
-                                                {row.qc2_status === "Approved" ? (
-                                                    <div className="space-y-1">
-                                                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${
-                                                            row.payment_request_status === "Payment Completed"
-                                                                ? "bg-green-100 text-green-800"
-                                                                : row.payment_request_status === "Pending Admin Approval"
-                                                                ? "bg-yellow-100 text-yellow-800"
-                                                                : "bg-gray-100 text-gray-800"
-                                                        }`}>
-                                                            {row.payment_request_status || "Not Requested"}
-                                                        </span>
-                                                        {row.payment_request_status === "Not Requested" && (
-                                                            <button type="button" onClick={() => sendPaymentRequest(index)} className="text-xs text-blue-600 hover:underline block">Request Payment</button>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-xs text-gray-400">-</span>
-                                                )}
-                                            </td>
-                                            <td className="p-2">
                                                 <div className="flex items-center gap-2">
-                                                    <button type="button" onClick={() => openEditSupplierModal(index)} className="p-2 text-blue-500 hover:text-blue-700" title="Edit sub-row details">
+                                                    <button type="button" onClick={() => openEditSupplierModal(index, "shipment")} className="p-2 text-blue-500 hover:text-blue-700" title="Edit shipment/QC2 details">
                                                         <Pencil size={16} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openEditSupplierModal(index, "component")}
+                                                        className="px-2 py-1 text-[11px] font-semibold text-indigo-700 border border-indigo-200 rounded hover:bg-indigo-50"
+                                                        title="Edit component details (will go to Pre-Process reapproval)"
+                                                    >
+                                                        Edit Details
                                                     </button>
                                                     <button type="button" onClick={() => removeSupplierRow(index)} className="p-2 text-red-500 hover:text-red-700" title="Delete row"><Trash2 size={16} /></button>
                                                 </div>
@@ -738,63 +922,63 @@ export default function EditPostProcessPage() {
                                 </tbody>
                             </table>
                         </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-3 mt-4">
+                            <span className="text-xs text-gray-500">Selected: {selectedSupplierRows.length}</span>
+                            <button type="button" onClick={moveSelectedToDispatch} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700">Move Selected to Dispatch</button>
+                            <button type="button" onClick={sendSelectedForQc2Approval} className="px-4 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700">Send Selected Items for QC2 Approval</button>
+                        </div>
                     </fieldset>
 
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-4">
                         <legend className="text-lg font-semibold text-green-800">Working Timeline</legend>
                         <div className="overflow-x-auto mt-4">
                             <table className="w-full min-w-[800px]">
                                 <thead>
                                     <tr className="bg-gray-50 text-left text-sm font-medium text-gray-600">
-                                        <th>S.No</th><th className="px-2">Description</th><th className="px-2">Assigned To</th><th className="px-2">Deadline</th><th className="px-2">Status</th><th className="px-2">Approved</th><th>Action</th>
+                                        <th>S.No</th><th className="px-2">Description</th><th className="px-2">Deadline</th><th className="px-2">Status</th><th className="px-2">Approved</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {formData.working_timeline.map((row, index) => (
                                         <tr key={index}>
-                                            <td><input type="number" value={row.s_no} onChange={(e) => handleTimelineChange(index, "s_no", parseInt(e.target.value) || 0, "working_timeline")} className="w-16 p-2 border rounded" /></td>
-                                            <td className="px-2"><input type="text" value={row.description} onChange={(e) => handleTimelineChange(index, "description", e.target.value, "working_timeline")} className="w-full p-2 border rounded" /></td>
-                                            <td className="px-2"><input list="teamMembers" value={row.assigned_to || ""} onChange={(e) => handleTimelineChange(index, "assigned_to", e.target.value, "working_timeline")} className="w-full p-2 border rounded" placeholder="Select Member" /></td>
-                                            <td className="px-2"><input type="date" value={row.deadline} onChange={(e) => handleTimelineChange(index, "deadline", e.target.value, "working_timeline")} className="w-full p-2 border rounded" /></td>
-                                            <td className="px-2"><select value={row.status} onChange={(e) => handleTimelineChange(index, "status", e.target.value as WorkingTimelineItem["status"], "working_timeline")} className="w-full p-2 border rounded bg-white"><option>Over Due</option><option>Completed</option></select></td>
-                                            <td className="px-2"><select value={row.approved} onChange={(e) => handleTimelineChange(index, "approved", e.target.value as WorkingTimelineItem["approved"], "working_timeline")} className="w-full p-2 border rounded bg-white"><option>Rework</option><option>Yes</option></select></td>
-                                            <td><button type="button" onClick={() => removeTimelineRow(index, "working_timeline")} className="p-2 text-red-500 hover:text-red-700"><Trash2 size={16} /></button></td>
+                                            <td className="p-2">{row.s_no}</td>
+                                            <td className="px-2 py-2">{row.description || "-"}</td>
+                                            <td className="px-2 py-2">{row.deadline || "-"}</td>
+                                            <td className="px-2"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${row.status === "Completed" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{row.status}</span></td>
+                                            <td className="px-2"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${row.approved === "Yes" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>{row.approved}</span></td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                            <datalist id="teamMembers">{teamMembers.map((m) => <option key={m} value={m} />)}</datalist>
                         </div>
-                        <button type="button" onClick={() => addTimelineRow("working_timeline")} className="mt-4 px-4 py-2 text-sm text-white bg-green-600 rounded hover:bg-green-700">+ Add Working Row</button>
                     </fieldset>
 
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-5">
                         <legend className="text-lg font-semibold text-green-800">Project Timeline</legend>
                         <div className="overflow-x-auto mt-4">
                             <table className="w-full">
                                 <thead>
                                     <tr className="bg-gray-50 text-left text-sm font-medium text-gray-600">
-                                        <th>S.No</th><th className="px-2">Description</th><th className="px-2">Deadline</th><th className="px-2">Status</th><th className="px-2">Final File</th><th>Action</th>
+                                        <th>S.No</th><th className="px-2">Description</th><th className="px-2">Deadline</th><th className="px-2">Status</th><th className="px-2">Final File</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {formData.project_timeline.map((row, index) => (
                                         <tr key={index}>
-                                            <td><input type="number" value={row.s_no} onChange={(e) => handleTimelineChange(index, "s_no", parseInt(e.target.value) || 0, "project_timeline")} className="w-16 p-2 border rounded" /></td>
-                                            <td className="px-2"><input type="text" value={row.description} onChange={(e) => handleTimelineChange(index, "description", e.target.value, "project_timeline")} className="w-full p-2 border rounded" /></td>
-                                            <td className="px-2"><input type="date" value={row.deadline} onChange={(e) => handleTimelineChange(index, "deadline", e.target.value, "project_timeline")} className="w-full p-2 border rounded" /></td>
-                                            <td className="px-2"><select value={row.status} onChange={(e) => handleTimelineChange(index, "status", e.target.value as ProjectTimelineItem["status"], "project_timeline")} className="w-full p-2 border rounded bg-white"><option>Over Due</option><option>Completed</option></select></td>
-                                            <td className="px-2"><input type="file" onChange={(e) => handleTimelineFileChange(e, index)} className="w-full p-1.5 border rounded text-xs" /></td>
-                                            <td><button type="button" onClick={() => removeTimelineRow(index, "project_timeline")} className="p-2 text-red-500 hover:text-red-700"><Trash2 size={16} /></button></td>
+                                            <td className="p-2">{row.s_no}</td>
+                                            <td className="px-2 py-2">{row.description || "-"}</td>
+                                            <td className="px-2 py-2">{row.deadline || "-"}</td>
+                                            <td className="px-2"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${row.status === "Completed" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{row.status}</span></td>
+                                            <td className="px-2 py-2">{row.final_fileName || "-"}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
-                        <button type="button" onClick={() => addTimelineRow("project_timeline")} className="mt-4 px-4 py-2 text-sm text-white bg-green-600 rounded hover:bg-green-700">+ Add Project Row</button>
                     </fieldset>
 
-                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm">
+                    <fieldset className="p-6 bg-white border rounded-lg shadow-sm order-7">
                         <legend className="text-lg font-semibold text-green-800">Project Status</legend>
                         <div className="mt-4">
                             <label htmlFor="post_process_status" className="block font-medium">Update Project Status</label>
@@ -802,7 +986,7 @@ export default function EditPostProcessPage() {
                                 <option value="Pending">In Progress</option>
                                 <option value="Completed">Mark as Completed</option>
                             </select>
-                            <p className="text-sm text-gray-500 mt-2">To move this project to Payment Pending, set status to Completed and ensure all Working Timeline tasks are approved.</p>
+                            <p className="text-sm text-gray-500 mt-2">To mark this project as completed, ensure all Working Timeline tasks are marked as Completed and approved as Yes.</p>
                         </div>
                     </fieldset>
 
@@ -830,61 +1014,123 @@ export default function EditPostProcessPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
                     <div className="w-full max-w-6xl bg-white rounded-lg shadow-xl">
                         <div className="px-6 py-4 border-b">
-                            <h2 className="text-2xl font-bold text-gray-800">Edit Supplier Row #{supplierDraft.s_no}</h2>
-                            <p className="text-sm text-gray-600 mt-1">Main supplier details are read-only. Only shipment/payment sub-row fields can be edited.</p>
+                            <h2 className="text-2xl font-bold text-gray-800">
+                                {supplierModalMode === "shipment" ? "Edit Shipment & QC2 Fields" : "Edit Component Details"} #{supplierDraft.s_no}
+                            </h2>
+                            <p className="text-sm text-gray-600 mt-1">
+                                {supplierModalMode === "shipment"
+                                    ? "Component details are read-only here. Use Edit Details to modify component master fields."
+                                    : "Saving here sends this component back to Pre-Process for QC1 and Admin approval, then it rejoins Post Process."}
+                            </p>
                         </div>
 
                         <div className="p-6 max-h-[75vh] overflow-y-auto space-y-6">
-                            <div className="border rounded-lg p-4 bg-gray-50">
-                                <h3 className="font-semibold text-gray-800 mb-3">Supplier Details (Read-only)</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-                                    <div><label className="block text-gray-600">Component Type</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.component_type || "-"}</p></div>
-                                    <div className="lg:col-span-3"><label className="block text-gray-600">Manufacturer - Part Number</label><p className="mt-1 p-2 bg-white border rounded break-words">{supplierDraft.manufacturer_part_number || "-"}</p></div>
-                                    <div className="lg:col-span-2"><label className="block text-gray-600">Vendor Details</label><p className="mt-1 p-2 bg-white border rounded break-words">{supplierDraft.vendor_details || "-"}</p></div>
-                                    <div><label className="block text-gray-600">Currency</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.currency || "-"}</p></div>
-                                    <div><label className="block text-gray-600">Percentage</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.percentage ?? 0}</p></div>
-                                    <div><label className="block text-gray-600">Req Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.req_quantity ?? 0}</p></div>
-                                    <div><label className="block text-gray-600">Excise Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.excise_quantity ?? 0}</p></div>
-                                    <div><label className="block text-gray-600">Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.quantity ?? 0}</p></div>
-                                    <div><label className="block text-gray-600">Unit Price</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.unit_price ?? 0}</p></div>
-                                    <div><label className="block text-gray-600">Total Price</label><p className="mt-1 p-2 bg-white border rounded font-semibold">{supplierDraft.total_price ?? 0}</p></div>
-                                </div>
-                            </div>
-
-                            <div className="border rounded-lg p-4 bg-blue-50">
-                                <h3 className="font-semibold text-gray-800 mb-3">QC2 Image Upload (Required)</h3>
-                                <input type="file" accept="image/*" onChange={(e) => handleSupplierDraftImageUpload(e.target.files?.[0] || null)} className="w-full p-2 border rounded bg-white text-sm" />
-                                {supplierDraft.qc2_image_upload && (
-                                    <div className="mt-3">
-                                        <p className="text-xs text-gray-600 break-words">{supplierDraft.qc2_image_upload}</p>
-                                        {supplierDraft.qc2_image_upload_url && (
-                                            <button type="button" onClick={() => openFile(supplierDraft.qc2_image_upload_url)} className="text-xs text-blue-600 hover:underline mt-1">View Image</button>
-                                        )}
+                            {supplierModalMode === "shipment" ? (
+                                <div className="border rounded-lg p-4 bg-gray-50">
+                                    <h3 className="font-semibold text-gray-800 mb-3">Supplier Details (Read-only)</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                        <div><label className="block text-gray-600">Component Type</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.component_type || "-"}</p></div>
+                                        <div className="lg:col-span-3"><label className="block text-gray-600">Manufacturer - Part Number</label><p className="mt-1 p-2 bg-white border rounded break-words">{supplierDraft.manufacturer_part_number || "-"}</p></div>
+                                        <div className="lg:col-span-2"><label className="block text-gray-600">Vendor Details</label><p className="mt-1 p-2 bg-white border rounded break-words">{supplierDraft.vendor_details || "-"}</p></div>
+                                        <div><label className="block text-gray-600">Currency</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.currency || "-"}</p></div>
+                                        <div><label className="block text-gray-600">Percentage</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.percentage ?? 0}</p></div>
+                                        <div><label className="block text-gray-600">Req Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.req_quantity ?? 0}</p></div>
+                                        <div><label className="block text-gray-600">Excise Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.excise_quantity ?? 0}</p></div>
+                                        <div><label className="block text-gray-600">Quantity</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.quantity ?? 0}</p></div>
+                                        <div><label className="block text-gray-600">Unit Price</label><p className="mt-1 p-2 bg-white border rounded">{supplierDraft.unit_price ?? 0}</p></div>
+                                        <div><label className="block text-gray-600">Total Price</label><p className="mt-1 p-2 bg-white border rounded font-semibold">{supplierDraft.total_price ?? 0}</p></div>
                                     </div>
-                                )}
-                            </div>
-
-                            <div className="border rounded-lg p-4">
-                                <h3 className="font-semibold text-gray-800 mb-3">Shipment Details</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-                                    <div><label className="block text-gray-600">Payment Terms</label><input type="text" value={supplierDraft.payment_terms || ""} onChange={(e) => handleSupplierDraftChange("payment_terms", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">Dispatch Date</label><input type="date" value={supplierDraft.dispatch_date || ""} onChange={(e) => handleSupplierDraftChange("dispatch_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">SF Number</label><input type="text" value={supplierDraft.sf_number || ""} onChange={(e) => handleSupplierDraftChange("sf_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">SF Date</label><input type="date" value={supplierDraft.sf_date || ""} onChange={(e) => handleSupplierDraftChange("sf_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">AWB Number</label><input type="text" value={supplierDraft.awb_number || ""} onChange={(e) => handleSupplierDraftChange("awb_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">AWB Date</label><input type="date" value={supplierDraft.awb_date || ""} onChange={(e) => handleSupplierDraftChange("awb_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">Total Weight (kg)</label><input type="number" value={supplierDraft.total_weight_kg || 0} onChange={(e) => handleSupplierDraftChange("total_weight_kg", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">Tracking Number</label><input type="text" value={supplierDraft.tracking_number || ""} onChange={(e) => handleSupplierDraftChange("tracking_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">Courier Details</label><input type="text" value={supplierDraft.courier_details || ""} onChange={(e) => handleSupplierDraftChange("courier_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div><label className="block text-gray-600">Duty Details</label><input type="text" value={supplierDraft.duty_details || ""} onChange={(e) => handleSupplierDraftChange("duty_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
-                                    <div className="lg:col-span-2"><label className="block text-gray-600">Shipment Details</label><input type="text" value={supplierDraft.shipment_details || ""} onChange={(e) => handleSupplierDraftChange("shipment_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="border rounded-lg p-4 bg-indigo-50">
+                                    <h3 className="font-semibold text-gray-800 mb-3">Component Details (Editable)</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                        <div>
+                                            <label className="block text-gray-600">Component Type</label>
+                                            <select value={supplierDraft.component_type} onChange={(e) => handleSupplierDraftChange("component_type", e.target.value)} className="w-full p-2 border rounded mt-1 bg-white">
+                                                <option value="Active">Active</option>
+                                                <option value="Passive">Passive</option>
+                                            </select>
+                                        </div>
+                                        <div className="lg:col-span-3">
+                                            <label className="block text-gray-600">Manufacturer - Part Number</label>
+                                            <input type="text" value={supplierDraft.manufacturer_part_number || ""} onChange={(e) => handleSupplierDraftChange("manufacturer_part_number", e.target.value)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div className="lg:col-span-2">
+                                            <label className="block text-gray-600">Vendor Details</label>
+                                            <input type="text" value={supplierDraft.vendor_details || ""} onChange={(e) => handleSupplierDraftChange("vendor_details", e.target.value)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Currency</label>
+                                            <input type="text" value={supplierDraft.currency || ""} onChange={(e) => handleSupplierDraftChange("currency", e.target.value)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Percentage</label>
+                                            <input type="number" value={supplierDraft.percentage ?? 0} onChange={(e) => handleSupplierDraftChange("percentage", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Req Quantity</label>
+                                            <input type="number" value={supplierDraft.req_quantity ?? 0} onChange={(e) => handleSupplierDraftChange("req_quantity", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Quantity</label>
+                                            <input type="number" value={supplierDraft.quantity ?? 0} onChange={(e) => handleSupplierDraftChange("quantity", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Unit Price</label>
+                                            <input type="number" value={supplierDraft.unit_price ?? 0} onChange={(e) => handleSupplierDraftChange("unit_price", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1 bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Excise Quantity</label>
+                                            <input type="number" value={supplierDraft.excise_quantity ?? 0} readOnly className="w-full p-2 border rounded mt-1 bg-gray-100" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-600">Total Price</label>
+                                            <input type="number" value={supplierDraft.total_price ?? 0} readOnly className="w-full p-2 border rounded mt-1 bg-gray-100 font-semibold" />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {supplierModalMode === "shipment" && (
+                                <div className="border rounded-lg p-4 bg-blue-50">
+                                    <h3 className="font-semibold text-gray-800 mb-3">QC2 Image Upload (Required)</h3>
+                                    <input type="file" accept="image/*" onChange={(e) => handleSupplierDraftImageUpload(e.target.files?.[0] || null)} className="w-full p-2 border rounded bg-white text-sm" />
+                                    {supplierDraft.qc2_image_upload && (
+                                        <div className="mt-3">
+                                            <p className="text-xs text-gray-600 break-words">{supplierDraft.qc2_image_upload}</p>
+                                            {supplierDraft.qc2_image_upload_url && (
+                                                <button type="button" onClick={() => openFile(supplierDraft.qc2_image_upload_url)} className="text-xs text-blue-600 hover:underline mt-1">View Image</button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {supplierModalMode === "shipment" && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="font-semibold text-gray-800 mb-3">Shipment Details</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                        <div><label className="block text-gray-600">Dispatch Date</label><input type="date" value={supplierDraft.dispatch_date || ""} onChange={(e) => handleSupplierDraftChange("dispatch_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">SF Number</label><input type="text" value={supplierDraft.sf_number || ""} onChange={(e) => handleSupplierDraftChange("sf_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">SF Date</label><input type="date" value={supplierDraft.sf_date || ""} onChange={(e) => handleSupplierDraftChange("sf_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">AWB Number</label><input type="text" value={supplierDraft.awb_number || ""} onChange={(e) => handleSupplierDraftChange("awb_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">AWB Date</label><input type="date" value={supplierDraft.awb_date || ""} onChange={(e) => handleSupplierDraftChange("awb_date", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">Total Weight (kg)</label><input type="number" value={supplierDraft.total_weight_kg || 0} onChange={(e) => handleSupplierDraftChange("total_weight_kg", parseFloat(e.target.value) || 0)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">Tracking Number</label><input type="text" value={supplierDraft.tracking_number || ""} onChange={(e) => handleSupplierDraftChange("tracking_number", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">Courier Details</label><input type="text" value={supplierDraft.courier_details || ""} onChange={(e) => handleSupplierDraftChange("courier_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div><label className="block text-gray-600">Duty Details</label><input type="text" value={supplierDraft.duty_details || ""} onChange={(e) => handleSupplierDraftChange("duty_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                        <div className="lg:col-span-2"><label className="block text-gray-600">Shipment Details</label><input type="text" value={supplierDraft.shipment_details || ""} onChange={(e) => handleSupplierDraftChange("shipment_details", e.target.value)} className="w-full p-2 border rounded mt-1" /></div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="px-6 py-4 border-t flex justify-end gap-3">
                             <button type="button" onClick={closeSupplierModal} className="px-5 py-2 font-semibold text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">Cancel</button>
-                            <button type="button" onClick={saveSupplierModal} className="px-5 py-2 font-semibold text-white bg-green-600 rounded-md hover:bg-green-700">Save Sub-row</button>
+                            <button type="button" onClick={saveSupplierModal} className="px-5 py-2 font-semibold text-white bg-green-600 rounded-md hover:bg-green-700">
+                                {supplierModalMode === "shipment" ? "Save Shipment" : "Save & Send To Pre-Process"}
+                            </button>
                         </div>
                     </div>
                 </div>

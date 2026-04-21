@@ -25,6 +25,36 @@ type PreprocessItem = {
     approval_requested_date?: string;
     approval_requested_by?: string;
     last_reminder_date?: string;
+    working_timeline?: Array<{
+        s_no: number;
+        description: string;
+        deadline: string;
+        notes?: string;
+        admin_status?: "Not Approved" | "Approved" | "Rework";
+        admin_remark?: string;
+    }>;
+    project_timeline?: Array<{
+        s_no: number;
+        description: string;
+        deadline: string;
+        notes?: string;
+        admin_status?: "Not Approved" | "Approved" | "Rework";
+        admin_remark?: string;
+    }>;
+    supplier_details?: Array<{
+        s_no: number;
+        component_type?: string;
+        manufacturer_part_number?: string;
+        vendor_details?: string;
+        req_quantity?: number;
+        excise_quantity?: number;
+        total_price?: number;
+        qc_status?: "Pending" | "Approved" | "Rejected";
+        admin_component_status?: "Not Approved" | "Approved" | "Rework";
+        admin_component_remark?: string;
+    }>;
+    stage_history?: Array<{ stage: string; date: string }>;
+    rejection_reason?: string;
     project_handled_by: string;
     [key: string]: any;
 };
@@ -96,8 +126,21 @@ export default function ApprovalsPage() {
         
         if (itemIndex !== -1) {
             const approvedItem = data[itemIndex];
+
+            const allWorkingApproved = (approvedItem.working_timeline || []).every((row) => row.admin_status === "Approved");
+            const allProjectApproved = (approvedItem.project_timeline || []).every((row) => row.admin_status === "Approved");
+            const allComponentsApproved =
+                (approvedItem.supplier_details || []).length > 0 &&
+                (approvedItem.supplier_details || []).every(
+                    (row) => row.qc_status === "Approved" && row.admin_component_status === "Approved"
+                );
+
+            if (!allWorkingApproved || !allProjectApproved || !allComponentsApproved) {
+                alert("All working timeline rows, project timeline rows, and components must be approved by Super Admin before moving to Post Process.");
+                return;
+            }
             
-            // Move to postprocess
+            // Move to postprocess or merge back into the original postprocess item
             const postprocessData = JSON.parse(localStorage.getItem("postprocessData") || "[]");
             
             // Create postprocess item with stage history
@@ -125,7 +168,36 @@ export default function ApprovalsPage() {
             
             const sanitizedPostprocessItem = await offloadDataUrls(itemWithoutApprovalFields, itemId);
 
-            postprocessData.push(sanitizedPostprocessItem);
+            const originPostprocessId = approvedItem.origin_postprocess_id;
+
+            if (originPostprocessId) {
+                const existingIndex = postprocessData.findIndex((entry: { id?: string }) => String(entry.id) === String(originPostprocessId));
+
+                if (existingIndex !== -1) {
+                    const existingPostprocessItem = postprocessData[existingIndex];
+                    const restoredSupplierRows = (approvedItem.supplier_details || []).map((row: any) => ({
+                        ...row,
+                        s_no: Number(row.origin_supplier_s_no || row.s_no || 1),
+                        qc2_status: "Not Sent",
+                        qc2_remark: "",
+                        payment_request_status: "Not Requested",
+                        payment_request_id: undefined,
+                    }));
+
+                    const mergedSupplierRows = [...(existingPostprocessItem.supplier_details || []), ...restoredSupplierRows]
+                        .map((row: any, index: number) => ({ ...row, s_no: index + 1 }));
+
+                    postprocessData[existingIndex] = {
+                        ...existingPostprocessItem,
+                        supplier_details: mergedSupplierRows,
+                        stage_history: [...(existingPostprocessItem.stage_history || []), { stage: "Reapproved supplier row returned to Post Process", date: new Date().toISOString() }],
+                    };
+                } else {
+                    postprocessData.push(sanitizedPostprocessItem);
+                }
+            } else {
+                postprocessData.push(sanitizedPostprocessItem);
+            }
             localStorage.setItem("postprocessData", JSON.stringify(postprocessData));
             
             // REMOVE the item from preprocess data (it's now in postprocess)
@@ -139,6 +211,56 @@ export default function ApprovalsPage() {
             loadData();
             alert("Item approved successfully and moved to Post Process!");
         }
+    };
+
+    const updatePreprocessItem = (itemId: string, updater: (item: PreprocessItem) => PreprocessItem) => {
+        setPreprocessData((prev) => {
+            const updated = prev.map((item) => (item.id === itemId ? updater(item) : item));
+            localStorage.setItem("preprocessData", JSON.stringify(updated));
+            return updated;
+        });
+    };
+
+    const updateWorkingTimelineReview = (
+        itemId: string,
+        rowIndex: number,
+        field: "admin_status" | "admin_remark",
+        value: string
+    ) => {
+        updatePreprocessItem(itemId, (item) => {
+            const rows = (item.working_timeline || []).map((row, index) =>
+                index === rowIndex ? { ...row, [field]: value } : row
+            );
+            return { ...item, working_timeline: rows };
+        });
+    };
+
+    const updateProjectTimelineReview = (
+        itemId: string,
+        rowIndex: number,
+        field: "admin_status" | "admin_remark",
+        value: string
+    ) => {
+        updatePreprocessItem(itemId, (item) => {
+            const rows = (item.project_timeline || []).map((row, index) =>
+                index === rowIndex ? { ...row, [field]: value } : row
+            );
+            return { ...item, project_timeline: rows };
+        });
+    };
+
+    const updateSupplierReview = (
+        itemId: string,
+        rowIndex: number,
+        field: "admin_component_status" | "admin_component_remark",
+        value: string
+    ) => {
+        updatePreprocessItem(itemId, (item) => {
+            const rows = (item.supplier_details || []).map((row, index) =>
+                index === rowIndex ? { ...row, [field]: value } : row
+            );
+            return { ...item, supplier_details: rows };
+        });
     };
 
     const handleReject = (itemId: string, pipelineId: string) => {
@@ -158,8 +280,12 @@ export default function ApprovalsPage() {
         if (itemIndex !== -1) {
             data[itemIndex] = {
                 ...data[itemIndex],
-                approval_status: "Rejected",
+                approval_status: "Modification",
                 rejection_reason: rejectionReason,
+                stage_history: [
+                    ...(data[itemIndex].stage_history || []),
+                    { stage: "Sent Back for Rework by Super Admin", date: new Date().toISOString() },
+                ],
             };
             
             localStorage.setItem("preprocessData", JSON.stringify(data));
@@ -171,7 +297,7 @@ export default function ApprovalsPage() {
             setRejectionModal({ isOpen: false, itemId: '', pipelineId: '' });
             setRejectionReason("");
             loadData();
-            alert("Item rejected. The user has been notified.");
+            alert("Item marked as rework. Employee can update and resend.");
         }
     };
 
@@ -187,8 +313,8 @@ export default function ApprovalsPage() {
         <div className="min-h-screen p-6 bg-gray-50">
             <div className="max-w-7xl mx-auto">
                 <header className="mb-6">
-                    <h1 className="text-3xl font-bold text-purple-700">Approval Requests</h1>
-                    <p className="text-gray-600 mt-1">Review and approve preprocessing items</p>
+                    <h1 className="text-3xl font-bold text-purple-700">Super Admin Approval Requests</h1>
+                    <p className="text-gray-600 mt-1">Review working timeline, project timeline, and components individually</p>
                 </header>
 
                 {approvalRequests.length === 0 ? (
@@ -293,7 +419,8 @@ export default function ApprovalsPage() {
                                                                     <th className="p-2 text-left">S.No</th>
                                                                     <th className="p-2 text-left">Description</th>
                                                                     <th className="p-2 text-left">Deadline</th>
-                                                                    <th className="p-2 text-left">Approved</th>
+                                                                    <th className="p-2 text-left">Super Admin Status</th>
+                                                                    <th className="p-2 text-left">Remark</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
@@ -302,7 +429,26 @@ export default function ApprovalsPage() {
                                                                         <td className="p-2">{row.s_no}</td>
                                                                         <td className="p-2">{row.description || "-"}</td>
                                                                         <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
-                                                                        <td className="p-2">{row.approved || "-"}</td>
+                                                                        <td className="p-2">
+                                                                            <select
+                                                                                value={row.admin_status || "Not Approved"}
+                                                                                onChange={(e) => updateWorkingTimelineReview(item.id, idx, "admin_status", e.target.value)}
+                                                                                className="w-full p-2 border rounded bg-white"
+                                                                            >
+                                                                                <option value="Not Approved">Not Approved</option>
+                                                                                <option value="Approved">Approved</option>
+                                                                                <option value="Rework">Rework</option>
+                                                                            </select>
+                                                                        </td>
+                                                                        <td className="p-2">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={row.admin_remark || ""}
+                                                                                onChange={(e) => updateWorkingTimelineReview(item.id, idx, "admin_remark", e.target.value)}
+                                                                                className="w-full p-2 border rounded"
+                                                                                placeholder="Remark"
+                                                                            />
+                                                                        </td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -321,6 +467,8 @@ export default function ApprovalsPage() {
                                                                     <th className="p-2 text-left">S.No</th>
                                                                     <th className="p-2 text-left">Description</th>
                                                                     <th className="p-2 text-left">Deadline</th>
+                                                                    <th className="p-2 text-left">Super Admin Status</th>
+                                                                    <th className="p-2 text-left">Remark</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
@@ -329,6 +477,26 @@ export default function ApprovalsPage() {
                                                                         <td className="p-2">{row.s_no}</td>
                                                                         <td className="p-2">{row.description || "-"}</td>
                                                                         <td className="p-2">{row.deadline ? format(new Date(row.deadline), "dd/MM/yyyy") : "-"}</td>
+                                                                        <td className="p-2">
+                                                                            <select
+                                                                                value={row.admin_status || "Not Approved"}
+                                                                                onChange={(e) => updateProjectTimelineReview(item.id, idx, "admin_status", e.target.value)}
+                                                                                className="w-full p-2 border rounded bg-white"
+                                                                            >
+                                                                                <option value="Not Approved">Not Approved</option>
+                                                                                <option value="Approved">Approved</option>
+                                                                                <option value="Rework">Rework</option>
+                                                                            </select>
+                                                                        </td>
+                                                                        <td className="p-2">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={row.admin_remark || ""}
+                                                                                onChange={(e) => updateProjectTimelineReview(item.id, idx, "admin_remark", e.target.value)}
+                                                                                className="w-full p-2 border rounded"
+                                                                                placeholder="Remark"
+                                                                            />
+                                                                        </td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -351,6 +519,9 @@ export default function ApprovalsPage() {
                                                                     <th className="p-2 text-right">Req Qty</th>
                                                                     <th className="p-2 text-right">Excise Qty</th>
                                                                     <th className="p-2 text-right">Total</th>
+                                                                    <th className="p-2 text-left">QC1</th>
+                                                                    <th className="p-2 text-left">Super Admin Status</th>
+                                                                    <th className="p-2 text-left">Remark</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
@@ -363,6 +534,27 @@ export default function ApprovalsPage() {
                                                                         <td className="p-2 text-right">{row.req_quantity || 0}</td>
                                                                         <td className="p-2 text-right">{row.excise_quantity || 0}</td>
                                                                         <td className="p-2 text-right">{(row.total_price || 0).toLocaleString("en-IN")}</td>
+                                                                        <td className="p-2">{row.qc_status || "Pending"}</td>
+                                                                        <td className="p-2">
+                                                                            <select
+                                                                                value={row.admin_component_status || "Not Approved"}
+                                                                                onChange={(e) => updateSupplierReview(item.id, idx, "admin_component_status", e.target.value)}
+                                                                                className="w-full p-2 border rounded bg-white"
+                                                                            >
+                                                                                <option value="Not Approved">Not Approved</option>
+                                                                                <option value="Approved">Approved</option>
+                                                                                <option value="Rework">Rework</option>
+                                                                            </select>
+                                                                        </td>
+                                                                        <td className="p-2">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={row.admin_component_remark || ""}
+                                                                                onChange={(e) => updateSupplierReview(item.id, idx, "admin_component_remark", e.target.value)}
+                                                                                className="w-full p-2 border rounded"
+                                                                                placeholder="Remark"
+                                                                            />
+                                                                        </td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -377,14 +569,14 @@ export default function ApprovalsPage() {
                                                     className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded hover:bg-green-700 flex items-center gap-2"
                                                 >
                                                     <CheckCircle className="h-4 w-4" />
-                                                    Approve
+                                                    Approve & Move to Post Process
                                                 </button>
                                                 <button
                                                     onClick={() => handleReject(request.id, request.pipelineId)}
                                                     className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700 flex items-center gap-2"
                                                 >
                                                     <XCircle className="h-4 w-4" />
-                                                    Reject
+                                                    Mark Rework
                                                 </button>
                                             </div>
                                         </div>
@@ -400,8 +592,8 @@ export default function ApprovalsPage() {
             {rejectionModal.isOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
                     <div className="w-full max-w-md p-6 m-4 bg-white rounded-lg shadow-xl">
-                        <h2 className="text-xl font-bold text-gray-800 mb-4">Reject Approval Request</h2>
-                        <p className="text-gray-600 mb-4">Please provide a reason for rejecting this request:</p>
+                        <h2 className="text-xl font-bold text-gray-800 mb-4">Send Back for Rework</h2>
+                        <p className="text-gray-600 mb-4">Please provide rework remark for employee:</p>
                         <textarea
                             value={rejectionReason}
                             onChange={(e) => setRejectionReason(e.target.value)}
@@ -423,7 +615,7 @@ export default function ApprovalsPage() {
                                 onClick={confirmReject}
                                 className="px-5 py-2 font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
                             >
-                                Confirm Rejection
+                                Confirm Rework
                             </button>
                         </div>
                     </div>

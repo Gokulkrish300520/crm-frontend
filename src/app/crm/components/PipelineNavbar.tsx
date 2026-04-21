@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter, usePathname, useParams } from "next/navigation";
-import { ChevronDown, Plus } from "lucide-react";
-import { useState, useEffect } from "react";
-import { STANDARD_PIPELINE_STAGES, HierarchicalPipeline, pipelineHelpers, type FlatPipeline } from "@/types/pipeline";
 import { STORAGE_KEYS } from "@/constants/storage";
+import { HierarchicalPipeline, pipelineHelpers, STANDARD_PIPELINE_STAGES, type FlatPipeline } from "@/types/pipeline";
 import { readJson } from "@/utils/storage";
+import { ChevronDown } from "lucide-react";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 // Convert stage names to URL-friendly slugs that match the folder structure
 const stageToSlug = (stage: string): string => {
@@ -17,6 +17,9 @@ const stageToSlug = (stage: string): string => {
     "Closed Deals": "closed-deals",
     "Pre-Process": "preprocess",
     "Post-Process": "postprocess",
+    "Dispatch": "dispatch",
+    "Final QC": "final-qc",
+    "Delivery": "delivery",
     "Payment Pending": "payment-pending",
     "Completed Projects": "completed-projects"
   };

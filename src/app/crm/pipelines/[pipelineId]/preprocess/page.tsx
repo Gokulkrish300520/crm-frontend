@@ -79,6 +79,11 @@ export default function PreprocessListPage() {
     message: "",
   });
 
+  const getQc1DisplayStatus = (status?: PreprocessItem["qc_status"]) => {
+    if (status === "QC1 Rework Required") return "Not Approved";
+    return status || "Pending QC1";
+  };
+
   // --- 3. Load Data ---
   useEffect(() => {
     const storedData = localStorage.getItem("preprocessData");
@@ -182,7 +187,7 @@ export default function PreprocessListPage() {
                             : "bg-yellow-100 text-yellow-800"
                         }`}
                       >
-                        {item.qc_status}
+                          {getQc1DisplayStatus(item.qc_status)}
                       </span>
                     ) : (
                     <span

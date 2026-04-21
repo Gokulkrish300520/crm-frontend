@@ -1,8 +1,8 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
 type Pipeline = {
@@ -25,6 +25,9 @@ function getStorageKeyForTab(tab: string) {
     "closed-deals": "closedDealsData",
     preprocess: "preprocessData",
     postprocess: "postprocessData",
+    dispatch: "dispatchData",
+    "final-qc": "finalQcData",
+    delivery: "deliveryData",
     "payment-pending": "paymentPendingData",
     "completed-projects": "completedProjectsData",
   };

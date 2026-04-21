@@ -36,6 +36,8 @@ type SupplierDetail = {
   qc2_reviewed_by?: string;
   qc2_image_upload?: string;
   qc2_image_upload_url?: string;
+  qc2_file?: string;
+  qc2_file_url?: string;
 };
 
 type PostProcessItem = {
@@ -56,7 +58,6 @@ type PostProcessItem = {
 export default function Qc2DashboardPage() {
   const [items, setItems] = useState<PostProcessItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedSubRows, setExpandedSubRows] = useState<Set<string>>(new Set());
 
   const loadData = () => {
     const postprocessData: PostProcessItem[] = JSON.parse(localStorage.getItem("postprocessData") || "[]");
@@ -101,7 +102,7 @@ export default function Qc2DashboardPage() {
     }
   };
 
-  const handleRowStatusChange = (itemId: string, rowIndex: number, status: "Approved" | "Rejected") => {
+  const handleRowStatusChange = (itemId: string, rowIndex: number, status: "Pending QC2" | "Approved" | "Rejected") => {
     setItems((prev) =>
       prev.map((item) => {
         if (item.id !== itemId) return item;
@@ -125,6 +126,28 @@ export default function Qc2DashboardPage() {
     );
   };
 
+  const handleRowFileChange = (itemId: string, rowIndex: number, file: File | null) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== itemId) return item;
+          const supplier_details = (item.supplier_details || []).map((row, idx) =>
+            idx === rowIndex
+              ? { ...row, qc2_file: file.name, qc2_file_url: dataUrl }
+              : row
+          );
+          return { ...item, supplier_details };
+        })
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+
   const submitQc2Review = (itemId: string) => {
     const allData: PostProcessItem[] = JSON.parse(localStorage.getItem("postprocessData") || "[]");
     const reviewItem = items.find((item) => item.id === itemId);
@@ -138,6 +161,8 @@ export default function Qc2DashboardPage() {
         ...row,
         qc2_status: row.qc2_status || "Pending QC2",
         qc2_remark: row.qc2_remark || "",
+        qc2_file: row.qc2_file || "",
+        qc2_file_url: row.qc2_file_url || "",
         qc2_reviewed_date: row.qc2_status === "Approved" || row.qc2_status === "Rejected" ? now : row.qc2_reviewed_date,
         qc2_reviewed_by: row.qc2_status === "Approved" || row.qc2_status === "Rejected" ? "QC2" : row.qc2_reviewed_by,
       }));
@@ -217,9 +242,11 @@ export default function Qc2DashboardPage() {
             {items.map((item) => {
               const requestedAt = item.qc2_submitted_date ? format(new Date(item.qc2_submitted_date), "dd/MM/yyyy hh:mm a") : "-";
               const requestedBy = item.qc2_submitted_by || item.project_handled_by || "-";
-              const reviewRows = (item.supplier_details || []).filter(
-                (r) => r.qc2_status === "Pending QC2" || r.qc2_status === "QC2 Rework Required" || r.qc2_status === "Approved" || r.qc2_status === "Rejected"
-              );
+              const reviewRows = (item.supplier_details || [])
+                .map((row, originalIndex) => ({ row, originalIndex }))
+                .filter(
+                  ({ row }) => row.qc2_status === "Pending QC2" || row.qc2_status === "QC2 Rework Required" || row.qc2_status === "Approved" || row.qc2_status === "Rejected"
+                );
 
               return (
                 <div key={item.id} className="bg-white border rounded-lg shadow-sm">
@@ -268,11 +295,12 @@ export default function Qc2DashboardPage() {
                               <th className="p-2 text-left">QC2 Image</th>
                               <th className="p-2 text-left">QC2 Status</th>
                               <th className="p-2 text-left">QC2 Remark</th>
+                              <th className="p-2 text-left">Upload</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {reviewRows.map((row, idx) => (
-                              <tr key={idx} className="border-t align-top">
+                            {reviewRows.map(({ row, originalIndex }) => (
+                              <tr key={originalIndex} className="border-t align-top">
                                 <td className="p-2">{row.s_no}</td>
                                 <td className="p-2">{row.component_type}</td>
                                 <td className="p-2">{row.manufacturer_part_number || "-"}</td>
@@ -294,10 +322,10 @@ export default function Qc2DashboardPage() {
                                 <td className="p-2">
                                   <select
                                     value={row.qc2_status === "Approved" || row.qc2_status === "Rejected" ? row.qc2_status : "Pending QC2"}
-                                    onChange={(e) => handleRowStatusChange(item.id, (item.supplier_details || []).findIndex((r) => r.s_no === row.s_no), e.target.value as "Approved" | "Rejected")}
+                                    onChange={(e) => handleRowStatusChange(item.id, originalIndex, e.target.value as "Pending QC2" | "Approved" | "Rejected")}
                                     className="w-full p-2 border rounded bg-white"
                                   >
-                                    <option value="Pending QC2" disabled>Pending QC2</option>
+                                    <option value="Pending QC2">Pending QC2</option>
                                     <option value="Approved">Approve</option>
                                     <option value="Rejected">Reject</option>
                                   </select>
@@ -305,11 +333,32 @@ export default function Qc2DashboardPage() {
                                 <td className="p-2">
                                   <textarea
                                     value={row.qc2_remark || ""}
-                                    onChange={(e) => handleRowRemarkChange(item.id, (item.supplier_details || []).findIndex((r) => r.s_no === row.s_no), e.target.value)}
+                                    onChange={(e) => handleRowRemarkChange(item.id, originalIndex, e.target.value)}
                                     rows={2}
                                     className="w-full p-2 border rounded"
                                     placeholder="Remark"
                                   />
+                                </td>
+                                <td className="p-2">
+                                  <input
+                                    type="file"
+                                    onChange={(e) => handleRowFileChange(item.id, originalIndex, e.target.files?.[0] || null)}
+                                    className="w-full p-1 text-xs border rounded bg-white"
+                                  />
+                                  {row.qc2_file && (
+                                    <div className="mt-1 space-y-1">
+                                      <p className="text-xs text-gray-500">{row.qc2_file}</p>
+                                      {row.qc2_file_url && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openFile(row.qc2_file_url)}
+                                          className="text-xs text-blue-600 hover:underline"
+                                        >
+                                          View file
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             ))}

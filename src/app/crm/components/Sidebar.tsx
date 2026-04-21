@@ -2,19 +2,19 @@
 
 import { STORAGE_KEYS } from "@/constants/storage";
 import {
-  HierarchicalPipeline,
-  pipelineHelpers,
-  type FlatPipeline
+    HierarchicalPipeline,
+    pipelineHelpers,
+    type FlatPipeline
 } from "@/types/pipeline";
 import { readJson, writeJson } from "@/utils/storage";
 import {
-  BookOpen,
-  CheckCircle,
-  Flag,
-  Layers,
-  Plus,
-  Settings,
-  Users
+    BookOpen,
+    CheckCircle,
+    Flag,
+    Layers,
+    Plus,
+    Settings,
+    Users
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -37,6 +37,9 @@ function getStorageKeyForTab(tab: string) {
     "closed-deals": "closedDealsData",
     preprocess: "preprocessData",
     postprocess: "postprocessData",
+    dispatch: "dispatchData",
+    "final-qc": "finalQcData",
+    delivery: "deliveryData",
     "payment-pending": "paymentPendingData",
     "completed-projects": "completedProjectsData",
   };
@@ -49,7 +52,9 @@ const NAV_ITEMS: NavItem[] = [
   { id: "companies", label: "Companies", href: "/crm/company", Icon: BookOpen },
   { id: "qc1", label: "QC1 Dashboard", href: "/crm/qc1", Icon: CheckCircle },
   { id: "qc2", label: "QC2 Dashboard", href: "/crm/qc2", Icon: CheckCircle },
-  { id: "payment-approvals", label: "Payment Approvals", href: "/crm/admin/payment-approvals", Icon: CheckCircle },
+  { id: "qc3", label: "QC3 Dashboard", href: "/crm/qc3", Icon: CheckCircle },
+  { id: "dispatch-approvals", label: "Dispatch Approvals", href: "/crm/admin/dispatch-approvals", Icon: CheckCircle },
+  { id: "payment-requests", label: "Payment Requests", href: "/crm/admin/payment-requests", Icon: CheckCircle },
   { id: "super-admin", label: "Super Admin", href: "/crm/admin", Icon: Settings },
 ];
 

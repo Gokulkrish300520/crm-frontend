@@ -81,6 +81,11 @@ export default function Qc1DashboardPage() {
   const [items, setItems] = useState<PreprocessItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const getQc1DisplayStatus = (status?: PreprocessItem["qc_status"]) => {
+    if (status === "QC1 Rework Required") return "Not Approved";
+    return status || "Pending QC1";
+  };
+
   const openQcFile = async (fileKey?: string, fallbackUrl?: string) => {
     let fileUrl = fallbackUrl;
 
@@ -372,7 +377,7 @@ export default function Qc1DashboardPage() {
                             ? "bg-red-100 text-red-800"
                             : "bg-yellow-100 text-yellow-800"
                         }`}>
-                          {item.qc_status || "Pending QC1"}
+                          {getQc1DisplayStatus(item.qc_status)}
                         </span>
                         <p className="text-xs text-gray-500 md:hidden mt-1">Status</p>
                       </div>
@@ -399,7 +404,7 @@ export default function Qc1DashboardPage() {
                             ? "bg-red-100 text-red-800"
                             : "bg-yellow-100 text-yellow-800"
                         }`}>
-                          {item.qc_status || "Pending QC1"}
+                          {getQc1DisplayStatus(item.qc_status)}
                         </span>
                       </div>
 

@@ -1,22 +1,25 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useRouter, usePathname, useParams } from "next/navigation";
-import { 
-  FileText, 
-  CheckCircle, 
-  FileEdit, 
-  XCircle, 
-  Settings, 
-  Wrench, 
-  DollarSign, 
-  PackageCheck,
-  MessageSquare,
-  ChevronDown
-} from "lucide-react";
 import { STORAGE_KEYS } from "@/constants/storage";
-import { readJson } from "@/utils/storage";
 import { type FlatPipeline } from "@/types/pipeline";
+import { readJson } from "@/utils/storage";
+import {
+    CheckCircle,
+    ChevronDown,
+    ClipboardCheck,
+    DollarSign,
+    FileEdit,
+    FileText,
+    Handshake,
+    MessageSquare,
+    PackageCheck,
+    Settings,
+    Truck,
+    Wrench,
+    XCircle
+} from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
 
 interface PipelineStageNavProps {
   pipelineId: string;
@@ -83,6 +86,27 @@ const PipelineStageNav: React.FC<PipelineStageNavProps> = ({ pipelineId }) => {
       path: `/crm/pipelines/${pipelineId}/postprocess`,
       icon: Wrench,
       color: "pink"
+    },
+    {
+      id: "dispatch",
+      label: "Dispatch",
+      path: `/crm/pipelines/${pipelineId}/dispatch`,
+      icon: Truck,
+      color: "blue"
+    },
+    {
+      id: "final-qc",
+      label: "Final QC",
+      path: `/crm/pipelines/${pipelineId}/final-qc`,
+      icon: ClipboardCheck,
+      color: "indigo"
+    },
+    {
+      id: "delivery",
+      label: "Delivery",
+      path: `/crm/pipelines/${pipelineId}/delivery`,
+      icon: Handshake,
+      color: "orange"
     },
     { 
       id: "payment-pending", 

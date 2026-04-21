@@ -56,7 +56,7 @@ export type ActivityLog = {
 };
 
 // Standard pipeline stages that all pipelines should have
-// Order: RFQ → Feasibility → Quotation → Negotiation → Closed Deals → Pre-Process → Post-Process → Payment Pending → Completed Projects
+// Order: RFQ → Feasibility → Quotation → Negotiation → Closed Deals → Pre-Process → Post-Process → Dispatch → Final QC → Delivery → Payment Pending → Completed Projects
 export const STANDARD_PIPELINE_STAGES = [
   "RFQ",
   "Feasibility",
@@ -65,6 +65,9 @@ export const STANDARD_PIPELINE_STAGES = [
   "Closed Deals",
   "Pre-Process",
   "Post-Process",
+  "Dispatch",
+  "Final QC",
+  "Delivery",
   "Payment Pending",
   "Completed Projects"
 ] as const;
@@ -83,7 +86,7 @@ export type HierarchicalPipeline = {
   rejectionInfo?: RejectionInfo; // Only present if status is "Rejected"
   activityLogs: ActivityLog[]; // Complete activity history
   isExpanded?: boolean; // UI state for expand/collapse
-  stages: PipelineStage[]; // Each pipeline has its own stages (must include all 8 standard stages)
+  stages: PipelineStage[]; // Each pipeline has its own stages (must include all standard stages)
   children: HierarchicalPipeline[]; // Nested sub-pipelines
 };
 
@@ -194,7 +197,7 @@ export const pipelineHelpers = {
    * Only pipelines with content should be saved
    */
   hasContent(pipeline: HierarchicalPipeline | FlatPipeline): boolean {
-    return pipeline.stages.some(stage => 
+    return pipeline.stages.some(stage =>
       Array.isArray(stage.items) && stage.items.length > 0
     );
   },
@@ -211,10 +214,10 @@ export const pipelineHelpers = {
    * Add activity log entry to pipeline
    */
   addActivityLog(
-    pipeline: HierarchicalPipeline, 
-    action: string, 
-    userId?: string, 
-    userName?: string, 
+    pipeline: HierarchicalPipeline,
+    action: string,
+    userId?: string,
+    userName?: string,
     details?: string
   ): HierarchicalPipeline {
     const log: ActivityLog = {
